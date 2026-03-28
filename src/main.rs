@@ -32,11 +32,7 @@ use crate::{
     config::CoreConfig,
     emotes::{Emotes, initialize_emote_decoder},
     events::{Event, Events, TwitchAction},
-    twitch::{
-        chatters_poller::ChattersPoller,
-        oauth::TwitchOauth,
-        websocket::TwitchWebsocket,
-    },
+    twitch::{chatters_poller::ChattersPoller, oauth::TwitchOauth, websocket::TwitchWebsocket},
 };
 
 mod app;

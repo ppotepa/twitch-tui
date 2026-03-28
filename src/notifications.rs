@@ -5,8 +5,11 @@ use tokio::sync::mpsc;
 use tracing::{error, warn};
 
 use crate::{
-    audio::{play_beep_blocking, play_embedded_sound_blocking, play_file_blocking},
-    config::{NotificationsConfig, SoundType, TriggerMode, TtsConfig},
+    audio::{
+        play_beep_blocking, play_embedded_sound_blocking, play_embedded_sound_with_mpv_blocking,
+        play_file_blocking, play_file_with_mpv_blocking,
+    },
+    config::{AudioOutputBackend, NotificationsConfig, SoundType, TriggerMode, TtsConfig},
     tts::create_tts_provider,
     twitch::api::streams::is_stream_live,
 };
@@ -122,16 +125,19 @@ impl NotificationHandler {
             }
             SoundType::Beep => {
                 let volume = event_sounds.volume;
-                tokio::spawn(play_beep(volume));
+                let config = self.notifications_config.clone();
+                tokio::spawn(play_beep(config, volume));
             }
             SoundType::Default => {
                 let volume = event_sounds.volume;
-                tokio::spawn(play_default_sound_for_event(event_type, volume));
+                let config = self.notifications_config.clone();
+                tokio::spawn(play_default_sound_for_event(config, event_type, volume));
             }
             SoundType::File => {
                 if let Some(ref sound_file) = event_sounds.sound_file {
                     let volume = event_sounds.volume;
-                    tokio::spawn(play_sound_file(sound_file.clone(), volume));
+                    let config = self.notifications_config.clone();
+                    tokio::spawn(play_sound_file(config, sound_file.clone(), volume));
                 }
             }
         }
@@ -214,9 +220,13 @@ async fn tts_worker(
     }
 }
 
-async fn play_beep(volume: f32) {
+async fn play_beep(config: NotificationsConfig, volume: f32) {
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = play_beep_blocking(volume) {
+        let result = match config.output_backend {
+            AudioOutputBackend::Rodio | AudioOutputBackend::Mpv => play_beep_blocking(volume),
+        };
+
+        if let Err(e) = result {
             warn!("Failed to play beep: {}", e);
         }
     })
@@ -224,9 +234,13 @@ async fn play_beep(volume: f32) {
     .ok();
 }
 
-async fn play_default_sound_for_event(event_type: EventType, volume: f32) {
+async fn play_default_sound_for_event(
+    config: NotificationsConfig,
+    event_type: EventType,
+    volume: f32,
+) {
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = play_default_sound_for_event_blocking(event_type, volume) {
+        if let Err(e) = play_default_sound_for_event_blocking(&config, event_type, volume) {
             warn!("Failed to play default sound: {}", e);
         }
     })
@@ -235,6 +249,7 @@ async fn play_default_sound_for_event(event_type: EventType, volume: f32) {
 }
 
 fn play_default_sound_for_event_blocking(
+    config: &NotificationsConfig,
     event_type: EventType,
     volume: f32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -243,12 +258,21 @@ fn play_default_sound_for_event_blocking(
         EventType::UserJoin => DEFAULT_JOIN_SOUND,
         EventType::UserLeave => DEFAULT_LEAVE_SOUND,
     };
-    play_embedded_sound_blocking(sound_data, volume)
+
+    match config.output_backend {
+        AudioOutputBackend::Rodio => play_embedded_sound_blocking(sound_data, volume),
+        AudioOutputBackend::Mpv => play_embedded_sound_with_mpv_blocking(
+            sound_data,
+            volume,
+            &config.output_device,
+            &config.output_client_name,
+        ),
+    }
 }
 
-async fn play_sound_file(path: String, volume: f32) {
+async fn play_sound_file(config: NotificationsConfig, path: String, volume: f32) {
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = play_sound_file_blocking(&path, volume) {
+        if let Err(e) = play_sound_file_blocking(&config, &path, volume) {
             warn!("Failed to play sound file '{}': {}", path, e);
         }
     })
@@ -257,13 +281,23 @@ async fn play_sound_file(path: String, volume: f32) {
 }
 
 fn play_sound_file_blocking(
+    config: &NotificationsConfig,
     path: &str,
     volume: f32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if !Path::new(path).exists() {
         return Err(format!("Sound file not found: {path}").into());
     }
-    play_file_blocking(Path::new(path), volume)
+
+    match config.output_backend {
+        AudioOutputBackend::Rodio => play_file_blocking(Path::new(path), volume),
+        AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
+            Path::new(path),
+            volume,
+            &config.output_device,
+            &config.output_client_name,
+        ),
+    }
 }
 
 async fn speak_text(

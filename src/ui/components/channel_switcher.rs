@@ -184,7 +184,6 @@ impl Component for ChannelSwitcherWidget {
             let mut matched = vec![];
 
             for (channel, matched_indices) in matched_results {
-
                 let line = channel
                     .chars()
                     .enumerate()

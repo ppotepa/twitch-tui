@@ -95,6 +95,8 @@ pub struct NotificationsConfig {
     pub output_backend: AudioOutputBackend,
     /// Output device/sink for notifications (empty = system default)
     pub output_device: String,
+    /// Client/application name exposed to PipeWire/PulseAudio tools such as `EasyEffects`.
+    pub output_client_name: String,
 }
 
 impl Default for NotificationsConfig {
@@ -145,6 +147,7 @@ impl Default for NotificationsConfig {
             chatters_channel: String::new(),
             output_backend: AudioOutputBackend::default(),
             output_device: String::new(),
+            output_client_name: "twt".to_string(),
         }
     }
 }

@@ -28,10 +28,7 @@ async fn handle_chat_notification(
                 if let Some(raid) = event.raid() {
                     event_tx
                         .send(Event::Twitch(TwitchEvent::Notification(
-                            TwitchNotification::Raid(
-                                raid.user_name.clone(),
-                                raid.viewer_count,
-                            ),
+                            TwitchNotification::Raid(raid.user_name.clone(), raid.viewer_count),
                         )))
                         .await?;
                 }

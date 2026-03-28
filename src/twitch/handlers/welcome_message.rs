@@ -6,6 +6,7 @@ use color_eyre::{
 };
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
+use tracing::warn;
 
 use crate::{
     events::Event,
@@ -86,9 +87,12 @@ pub async fn handle_channel_join(
         .context("Failed to send twitch join message")?;
 
     // Handle new chat settings with roomstate
-    let chat_settings =
-        get_chat_settings(context.twitch_client().as_ref(), context.channel_id()).await?;
-    handle_roomstate(&chat_settings, event_tx).await?;
+    match get_chat_settings(context.twitch_client().as_ref(), context.channel_id()).await {
+        Ok(chat_settings) => handle_roomstate(&chat_settings, event_tx).await?,
+        Err(err) => {
+            warn!("Failed to fetch chat settings for #{channel_name}: {err}");
+        }
+    }
 
     Ok(())
 }

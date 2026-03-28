@@ -72,6 +72,8 @@ pub struct FrontendConfig {
     pub audio_backend: AudioBackend,
     /// Output device/sink for stream audio (empty = system default)
     pub audio_output_device: String,
+    /// Client/application name exposed to PipeWire/PulseAudio tools such as `EasyEffects`.
+    pub audio_client_name: String,
     /// OBS-friendly mode: routes all audio through unified backend
     pub audio_obs_mode: bool,
 }
@@ -128,6 +130,7 @@ impl Default for FrontendConfig {
             audio_follow_channel_switch: true,
             audio_backend: AudioBackend::default(),
             audio_output_device: String::new(),
+            audio_client_name: "twt".to_string(),
             audio_obs_mode: false,
         }
     }
@@ -209,6 +212,10 @@ impl From<FrontendConfig> for Vec<(String, String)> {
             (
                 "Audio output device".to_string(),
                 config.audio_output_device.clone(),
+            ),
+            (
+                "Audio client name".to_string(),
+                config.audio_client_name.clone(),
             ),
             (
                 "Audio OBS mode".to_string(),

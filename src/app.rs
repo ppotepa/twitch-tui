@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
+    fmt::Write as _,
     io::{Read, Write, stdout},
     process::{Child, Command, Stdio},
     rc::Rc,
@@ -28,6 +29,7 @@ use tui::{
 };
 
 use crate::{
+    audio::{apply_audio_client_env, apply_mpv_audio_options},
     config::{AudioBackend, SharedCoreConfig},
     emotes::{
         ApplyCommand, DecodedEmote, DownloadedEmotes, Emotes, SharedEmotes, display_emote,
@@ -301,17 +303,28 @@ impl App {
         println!("\n📺 Watching {channel} — press Q to return\n");
 
         // mpv --vo=tct renders directly into the terminal as true-color blocks
-        let status = Command::new("mpv")
-            .args([
-                "--vo=tct",
-                "--profile=sw-fast",
-                &format!("--volume={}", self.config.frontend.audio_volume.min(100)),
-                "--ytdl-format=best[height<=480]",
-                "--really-quiet",
-                "--term-osd-bar",
-                &url,
-            ])
-            .status();
+        let mut args = vec![
+            "--vo=tct".to_string(),
+            "--profile=sw-fast".to_string(),
+            format!("--volume={}", self.config.frontend.audio_volume.min(100)),
+            "--ytdl-format=best[height<=480]".to_string(),
+            "--really-quiet".to_string(),
+            "--term-osd-bar".to_string(),
+        ];
+        apply_mpv_audio_options(
+            &mut args,
+            &self.config.frontend.audio_output_device,
+            &self.config.frontend.audio_client_name,
+        );
+        args.push(url);
+
+        let mut player = Command::new("mpv");
+        apply_audio_client_env(
+            &mut player,
+            &self.config.frontend.audio_client_name,
+            "video",
+        );
+        let status = player.args(&args).status();
 
         match status {
             Ok(exit) if exit.success() => {}
@@ -379,35 +392,71 @@ impl App {
                     a
                 };
 
-                if args
+                let (cmd, mut args) = if args
                     .iter()
                     .any(|arg| arg.starts_with("--volume=") || arg == "--volume")
                 {
                     (args[0].clone(), args[1..].to_vec())
                 } else {
-                    let mut args = args;
-                    args.insert(
+                    let mut mpv_args = args[1..].to_vec();
+                    mpv_args.insert(
                         1,
                         format!("--volume={}", self.config.frontend.audio_volume.min(100)),
                     );
-                    (args[0].clone(), args[1..].to_vec())
+                    (args[0].clone(), mpv_args)
+                };
+
+                if cmd == "mpv" || cmd.ends_with("/mpv") {
+                    apply_mpv_audio_options(
+                        &mut args,
+                        &self.config.frontend.audio_output_device,
+                        &self.config.frontend.audio_client_name,
+                    );
                 }
+
+                (cmd, args)
             }
             AudioBackend::Streamlink => {
                 // Use streamlink for stream audio with mpv as output
                 let volume = self.config.frontend.audio_volume.min(100);
+                let mut player_cmd = format!("mpv --no-video --volume={volume}");
+
+                if !self.config.frontend.audio_client_name.is_empty() {
+                    let _ = write!(
+                        player_cmd,
+                        " --audio-client-name={}",
+                        shell_escape_arg(&self.config.frontend.audio_client_name)
+                    );
+                }
+
+                if !self.config.frontend.audio_output_device.is_empty() {
+                    let _ = write!(
+                        player_cmd,
+                        " --audio-device={}",
+                        shell_escape_arg(&self.config.frontend.audio_output_device)
+                    );
+                }
+
+                player_cmd.push_str(" -");
                 let cmd = "streamlink".to_string();
                 let args = vec![
                     url.clone(),
                     "audio,worst".to_string(), // Try audio-only format first, fallback to worst quality
                     "-o".to_string(),
-                    format!("mpv --no-video --volume={volume} -"), // Pipe to mpv
+                    player_cmd, // Pipe to mpv
                 ];
                 (cmd, args)
             }
         };
 
-        match Command::new(&cmd)
+        let mut player = Command::new(&cmd);
+        apply_audio_client_env(
+            &mut player,
+            &self.config.frontend.audio_client_name,
+            "music",
+        );
+
+        match player
             .args(&args)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -873,8 +922,7 @@ impl App {
     }
 
     fn draw_channel_tabs(&self, f: &mut Frame, area: Rect) {
-        use tui::text::Line;
-        use tui::widgets::Tabs;
+        use tui::{text::Line, widgets::Tabs};
         let tab_titles: Vec<Line> = self
             .channel_tabs
             .iter()
@@ -958,36 +1006,126 @@ impl App {
         }
 
         let area = f.area();
-        let width = self
+
+        // Max usable content width is 60 columns or 80% of screen, whichever is smaller.
+        let max_content_w = ((area.width as usize).saturating_mul(4) / 5).clamp(10, 60);
+
+        // Each toast: word-wrap its text to max_content_w, then height = lines + 2 (borders).
+        let toasts: Vec<(Vec<String>, u16)> = self
             .toasts
             .iter()
-            .map(|toast| toast.text.chars().count())
-            .max()
-            .unwrap_or(20)
-            .min(60) as u16
-            + 4;
-        let width = width.min(area.width.saturating_sub(2)).max(20);
-        let x = area.width.saturating_sub(width + 1);
-        let toast_height = 3u16;
+            .map(|toast| {
+                let lines = word_wrap_text(&toast.text, max_content_w);
+                let h = (lines.len() as u16 + 2).max(3);
+                (lines, h)
+            })
+            .collect();
 
-        for (idx, toast) in self.toasts.iter().rev().enumerate() {
-            let y = 1 + idx as u16 * toast_height;
-            if y + toast_height >= area.height {
+        // Derive the render width from the longest actual line across all toasts.
+        let max_line_len: usize = toasts
+            .iter()
+            .flat_map(|(lines, _): &(Vec<String>, u16)| lines.iter())
+            .map(|l: &String| l.chars().count())
+            .max()
+            .unwrap_or(10)
+            .min(max_content_w);
+        let render_w = (max_line_len as u16 + 4)
+            .min(area.width.saturating_sub(2))
+            .max(14);
+
+        // Total stack height including 1-line gaps between toasts.
+        let gap: u16 = 1;
+        let total_h: u16 = toasts
+            .iter()
+            .map(|(_, h)| h)
+            .sum::<u16>()
+            .saturating_add(gap * toasts.len().saturating_sub(1) as u16);
+
+        // Center the whole stack on screen.
+        let start_x = area.x + area.width.saturating_sub(render_w) / 2;
+        let start_y = area.y + area.height.saturating_sub(total_h) / 2;
+
+        let border_type = self.config.frontend.border_type.clone().into();
+        let mut cursor_y = start_y;
+
+        for (toast_lines, toast_h) in &toasts {
+            if cursor_y + toast_h > area.y + area.height {
                 break;
             }
-
-            let rect = Rect::new(x, y, width, toast_height);
-            let paragraph = Paragraph::new(toast.text.clone())
+            let rect = Rect::new(start_x, cursor_y, render_w, *toast_h);
+            let text: String = toast_lines.join("\n");
+            let paragraph = Paragraph::new(text)
                 .block(
                     Block::default()
                         .borders(tui::widgets::Borders::ALL)
-                        .border_type(self.config.frontend.border_type.clone().into())
-                        .style(Style::default().bg(Color::Black).fg(Color::White)),
+                        .border_type(border_type)
+                        .style(Style::default().bg(Color::Rgb(30, 30, 30)).fg(Color::White)),
                 )
-                .wrap(Wrap { trim: true });
+                .alignment(tui::layout::Alignment::Center)
+                .wrap(Wrap { trim: false });
             f.render_widget(Clear, rect);
             f.render_widget(paragraph, rect);
+            cursor_y += toast_h + gap;
         }
+    }
+}
+
+/// Word-wrap `text` to `max_width` columns, returning a Vec of lines.
+fn word_wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let word_len = word.chars().count();
+            let cur_len = current.chars().count();
+            if current.is_empty() {
+                if word_len > max_width {
+                    // Force-break a single word that's too long
+                    let chars = word.chars();
+                    let mut chunk = String::new();
+                    for c in chars {
+                        chunk.push(c);
+                        if chunk.chars().count() == max_width {
+                            lines.push(chunk.clone());
+                            chunk.clear();
+                        }
+                    }
+                    current = chunk;
+                } else {
+                    current = word.to_string();
+                }
+            } else if cur_len + 1 + word_len <= max_width {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                lines.push(current.clone());
+                current = word.to_string();
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn shell_escape_arg(value: &str) -> String {
+    if value.is_empty() {
+        "''".to_string()
+    } else if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 

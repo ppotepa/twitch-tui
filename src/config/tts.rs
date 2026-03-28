@@ -70,6 +70,8 @@ pub struct TtsConfig {
     pub output_backend: AudioOutputBackend,
     /// Output device/sink for TTS (empty = system default)
     pub output_device: String,
+    /// Client/application name exposed to PipeWire/PulseAudio tools such as `EasyEffects`.
+    pub output_client_name: String,
     /// espeak-ng provider settings
     pub espeak_ng: EspeakNgTtsConfig,
     /// google-cloud provider settings
@@ -103,6 +105,7 @@ impl Default for TtsConfig {
             max_queue_depth: 3,
             output_backend: AudioOutputBackend::default(),
             output_device: String::new(),
+            output_client_name: "twt".to_string(),
             espeak_ng: EspeakNgTtsConfig {
                 voice: "en-us".to_string(),
                 rate: 175,

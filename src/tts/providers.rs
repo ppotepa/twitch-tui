@@ -6,14 +6,19 @@ use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 use tracing::warn;
 
 use super::{TtsBackend, TtsProvider};
-use crate::{audio::play_file_blocking, config::TtsConfig};
+use crate::{
+    audio::{play_file_blocking, play_file_with_mpv_blocking},
+    config::{AudioOutputBackend, TtsConfig},
+};
 
 fn shell_escape_single_quotes(text: &str) -> String {
     text.replace('\'', "'\\''")
 }
 
 /// Festival TTS provider (local, requires festival installed)
-pub struct FestivalProvider;
+pub struct FestivalProvider {
+    pub output_client_name: String,
+}
 
 #[async_trait]
 impl TtsBackend for FestivalProvider {
@@ -23,6 +28,10 @@ impl TtsBackend for FestivalProvider {
             "echo '{}' | festival --tts",
             shell_escape_single_quotes(text)
         ));
+        if !self.output_client_name.is_empty() {
+            cmd.env("PULSE_PROP_application.name", &self.output_client_name)
+                .env("PULSE_PROP_media.role", "phone");
+        }
 
         let output = cmd.output().await?;
 
@@ -40,6 +49,9 @@ impl TtsBackend for FestivalProvider {
 pub struct EspeakNgProvider {
     pub voice: String,
     pub speed: i32,
+    pub output_backend: AudioOutputBackend,
+    pub output_device: String,
+    pub output_client_name: String,
 }
 
 #[async_trait]
@@ -49,15 +61,55 @@ impl TtsBackend for EspeakNgProvider {
         cmd.arg("-v")
             .arg(&self.voice)
             .arg("-s")
-            .arg(self.speed.to_string())
-            .arg(text);
+            .arg(self.speed.to_string());
 
-        let output = cmd.output().await?;
+        match self.output_backend {
+            AudioOutputBackend::Rodio => {
+                cmd.arg(text);
+                if !self.output_client_name.is_empty() {
+                    cmd.env("PULSE_PROP_application.name", &self.output_client_name)
+                        .env("PULSE_PROP_media.role", "phone");
+                }
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("espeak-ng TTS failed: {}", stderr);
-            return Err(std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into());
+                let output = cmd.output().await?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    warn!("espeak-ng TTS failed: {}", stderr);
+                    return Err(
+                        std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into(),
+                    );
+                }
+            }
+            AudioOutputBackend::Mpv => {
+                cmd.arg("--stdout").arg(text);
+                let output = cmd.output().await?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    warn!("espeak-ng TTS failed: {}", stderr);
+                    return Err(
+                        std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into(),
+                    );
+                }
+
+                let tmp = NamedTempFile::with_suffix(".wav")?;
+                let tmp_path = tmp.path().to_path_buf();
+                let mut f = File::create(&tmp_path).await?;
+                f.write_all(&output.stdout).await?;
+                f.flush().await?;
+                drop(f);
+
+                let output_device = self.output_device.clone();
+                let output_client_name = self.output_client_name.clone();
+                tokio::task::spawn_blocking(move || {
+                    play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
+                })
+                .await
+                .map_err(|err| {
+                    std::io::Error::other(format!("espeak-ng playback task failed: {err}"))
+                })??;
+            }
         }
 
         Ok(())
@@ -68,6 +120,9 @@ impl TtsBackend for EspeakNgProvider {
 pub struct GoogleCloudProvider {
     pub voice_name: String,
     pub language_code: String,
+    pub output_backend: AudioOutputBackend,
+    pub output_device: String,
+    pub output_client_name: String,
 }
 
 #[async_trait]
@@ -114,11 +169,19 @@ impl TtsBackend for GoogleCloudProvider {
         f.flush().await?;
         drop(f);
 
-        tokio::task::spawn_blocking(move || play_file_blocking(&tmp_path, 1.0))
-            .await
-            .map_err(|err| {
-                std::io::Error::other(format!("Google Cloud playback task failed: {err}"))
-            })??;
+        let output_backend = self.output_backend.clone();
+        let output_device = self.output_device.clone();
+        let output_client_name = self.output_client_name.clone();
+        tokio::task::spawn_blocking(move || match output_backend {
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, 1.0),
+            AudioOutputBackend::Mpv => {
+                play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
+            }
+        })
+        .await
+        .map_err(|err| {
+            std::io::Error::other(format!("Google Cloud playback task failed: {err}"))
+        })??;
 
         Ok(())
     }
@@ -129,6 +192,9 @@ pub struct EdgeTtsProvider {
     pub voice: String,
     pub rate: String,
     pub volume: String,
+    pub output_backend: AudioOutputBackend,
+    pub output_device: String,
+    pub output_client_name: String,
 }
 
 #[async_trait]
@@ -157,11 +223,17 @@ impl TtsBackend for EdgeTtsProvider {
             return Err(std::io::Error::other(format!("edge-tts failed: {stderr}")).into());
         }
 
-        tokio::task::spawn_blocking(move || play_file_blocking(&tmp_path, 1.0))
-            .await
-            .map_err(|err| {
-                std::io::Error::other(format!("edge-tts playback task failed: {err}"))
-            })??;
+        let output_backend = self.output_backend.clone();
+        let output_device = self.output_device.clone();
+        let output_client_name = self.output_client_name.clone();
+        tokio::task::spawn_blocking(move || match output_backend {
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, 1.0),
+            AudioOutputBackend::Mpv => {
+                play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
+            }
+        })
+        .await
+        .map_err(|err| std::io::Error::other(format!("edge-tts playback task failed: {err}")))??;
 
         Ok(())
     }
@@ -170,7 +242,9 @@ impl TtsBackend for EdgeTtsProvider {
 /// Create a TTS provider from config
 pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dyn TtsBackend> {
     match provider {
-        TtsProvider::Festival => Box::new(FestivalProvider),
+        TtsProvider::Festival => Box::new(FestivalProvider {
+            output_client_name: config.output_client_name.clone(),
+        }),
         TtsProvider::EspeakNg => Box::new(EspeakNgProvider {
             voice: config
                 .voice
@@ -178,6 +252,9 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| config.espeak_ng.voice.clone()),
             speed: config.rate.unwrap_or(config.espeak_ng.rate),
+            output_backend: config.output_backend.clone(),
+            output_device: config.output_device.clone(),
+            output_client_name: config.output_client_name.clone(),
         }),
         TtsProvider::GoogleCloud => Box::new(GoogleCloudProvider {
             voice_name: config
@@ -190,6 +267,9 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
                 .clone()
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| config.google_cloud.language_code.clone()),
+            output_backend: config.output_backend.clone(),
+            output_device: config.output_device.clone(),
+            output_client_name: config.output_client_name.clone(),
         }),
         TtsProvider::EdgeTts => Box::new(EdgeTtsProvider {
             voice: config
@@ -199,6 +279,9 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
                 .unwrap_or_else(|| config.edge_tts.voice.clone()),
             rate: config.edge_tts.rate.clone(),
             volume: config.edge_tts.volume.clone(),
+            output_backend: config.output_backend.clone(),
+            output_device: config.output_device.clone(),
+            output_client_name: config.output_client_name.clone(),
         }),
     }
 }

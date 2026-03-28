@@ -64,9 +64,14 @@ impl ChatWidget {
         let channel_input =
             ChannelSwitcherWidget::new(config.clone(), event_tx.clone(), storage.clone());
         let search_input = MessageSearchWidget::new(config.clone(), event_tx.clone());
-        let following =
-            FollowingWidget::new(config.clone(), twitch_oauth.clone(), event_tx.clone(), false);
-        let live_following = FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone(), true);
+        let following = FollowingWidget::new(
+            config.clone(),
+            twitch_oauth.clone(),
+            event_tx.clone(),
+            false,
+        );
+        let live_following =
+            FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone(), true);
         let chat_stats = ChatStatsWidget::new(messages.clone());
 
         let scroll_offset = Scrolling::new(config.frontend.inverted_scrolling);

@@ -45,7 +45,10 @@ impl Display for StreamingUser {
             viewer_count,
         } = self;
         let fmt_game = format!("[{game_name:.20}]");
-        write!(f, "{user_login:<20.20} {viewer_count:>7}👥  {fmt_game:<22} {title:.40}")
+        write!(
+            f,
+            "{user_login:<20.20} {viewer_count:>7}👥  {fmt_game:<22} {title:.40}"
+        )
     }
 }
 
@@ -128,9 +131,11 @@ pub async fn get_user_following(
             .await?;
 
         live_channels.data.sort_by(|a, b| {
-            b.viewer_count
-                .cmp(&a.viewer_count)
-                .then_with(|| a.user_login.to_lowercase().cmp(&b.user_login.to_lowercase()))
+            b.viewer_count.cmp(&a.viewer_count).then_with(|| {
+                a.user_login
+                    .to_lowercase()
+                    .cmp(&b.user_login.to_lowercase())
+            })
         });
 
         live_channels.into()
@@ -149,7 +154,9 @@ pub async fn get_user_following(
     };
 
     if !live {
-        channels.data.sort_by_key(|channel| channel.broadcaster_login.to_lowercase());
+        channels
+            .data
+            .sort_by_key(|channel| channel.broadcaster_login.to_lowercase());
     }
 
     Ok(channels)

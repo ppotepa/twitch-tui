@@ -182,6 +182,16 @@ impl TwitchWebsocketThread {
                 Some(action) = self.action_rx.recv() => {
                     if let Err(err) = self.handle_twitch_action(action).await {
                         error!("Failed to handle twitch action: {err}");
+                        let _ = self
+                            .event_tx
+                            .send(
+                                DataBuilder::system(format!(
+                                    "⚠ Failed to switch channel or handle Twitch action: {}",
+                                    format_error_chain(&err)
+                                ))
+                                .into(),
+                            )
+                            .await;
                     }
                 }
                 Some(message) = stream.next() => {
@@ -245,4 +255,20 @@ impl TwitchWebsocketThread {
         )
         .await
     }
+}
+
+fn format_error_chain(err: &color_eyre::Report) -> String {
+    let mut parts = err.chain().map(ToString::to_string);
+    let Some(mut message) = parts.next() else {
+        return "unknown error".to_string();
+    };
+
+    for part in parts {
+        if part != message {
+            message.push_str(" | caused by: ");
+            message.push_str(&part);
+        }
+    }
+
+    message
 }

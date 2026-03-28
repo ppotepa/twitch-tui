@@ -38,6 +38,10 @@ impl ReceivedTwitchSubscriptionCondition {
     pub const fn broadcaster_user_id(&self) -> &String {
         &self.broadcaster_user_id
     }
+
+    pub const fn user_id(&self) -> &String {
+        &self.user_id
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -309,6 +313,10 @@ impl ReceivedTwitchSubscriptionTransport {
             session_id,
         }
     }
+
+    pub const fn session_id(&self) -> &String {
+        &self.session_id
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -348,8 +356,16 @@ impl ReceivedTwitchSubscription {
         self.id.as_ref()
     }
 
+    pub const fn status(&self) -> Option<&String> {
+        self.status.as_ref()
+    }
+
     pub const fn condition(&self) -> &ReceivedTwitchSubscriptionCondition {
         &self.condition
+    }
+
+    pub const fn transport(&self) -> &ReceivedTwitchSubscriptionTransport {
+        &self.transport
     }
 }
 

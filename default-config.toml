@@ -129,6 +129,8 @@ audio_volume = 85
 audio_follow_channel_switch = true
 # Output device/sink for stream audio (empty = system default)
 audio_output_device = ""
+# Client/application name for stream audio in PipeWire/PulseAudio tools such as EasyEffects
+audio_client_name = "twt"
 # OBS-friendly mode: routes all audio through unified backend for consistent capture
 # When enabled, consider using a virtual sink and configuring PipeWire/Pulseaudio monitor
 audio_obs_mode = false
@@ -293,6 +295,8 @@ chatters_channel = ""
 output_backend = "rodio"
 # Output device/sink for notifications (empty = system default)
 output_device = ""
+# Client/application name for notification audio in PipeWire/PulseAudio tools such as EasyEffects
+output_client_name = "twt"
 
 [tts]
 # Enable text-to-speech for chat messages
@@ -318,6 +322,8 @@ max_queue_depth = 3
 output_backend = "rodio"
 # Output device/sink for TTS (empty = system default)
 output_device = ""
+# Client/application name for TTS audio in PipeWire/PulseAudio tools such as EasyEffects
+output_client_name = "twt"
 
 [tts.edge_tts]
 # Free Microsoft Edge neural voices — requires `edge-tts` Python package:

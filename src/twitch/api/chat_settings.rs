@@ -1,5 +1,6 @@
 use color_eyre::{Result, eyre::ContextCompat};
 use reqwest::Client;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use super::{ModeratorQuery, ResponseList, TWITCH_API_BASE_URL};
@@ -56,11 +57,25 @@ pub async fn get_chat_settings(
 
     let url = format!("{TWITCH_API_BASE_URL}/chat/settings?broadcaster_id={broadcaster_id}");
 
-    let response_data = client
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
+    let response = client.get(&url).send().await?;
+
+    if response.status() == StatusCode::FORBIDDEN {
+        return Err(std::io::Error::other(format!(
+            "Not authorized to fetch chat settings for broadcaster {broadcaster_id}"
+        ))
+        .into());
+    }
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(std::io::Error::other(format!(
+            "Failed to fetch chat settings for broadcaster {broadcaster_id}: {status} {body}"
+        ))
+        .into());
+    }
+
+    let response_data = response
         .json::<ResponseList<TwitchChatSettingsResponse>>()
         .await?
         .data
