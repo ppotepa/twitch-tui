@@ -57,37 +57,50 @@ const ESPEAK_SPATIAL_VOICES: &[&str] = &[
     "en-gb+m1", "en-gb+m2", "en-gb+m3", "en-gb+f1", "en-gb+f2",
 ];
 
-/// Build an ffmpeg audio filter string that simulates a sound source at `angle_deg`
-/// degrees around the listener on a horizontal circle (0° = front, 90° = right,
-/// 180° = back, 270° = left).
+/// Build an ffmpeg audio filter string for full 3D spatial positioning.
+/// `angle_deg`: degrees around the listener (0=front, 90=right, 180=back, 270=left).
 ///
-/// Two perceptual cues are encoded:
-///   1. **Azimuth (L/R)** via independent channel attenuation:  pan = sin(angle)
-///   2. **Front/back** via pinna simulation: rear sources lose high frequencies
-///      (lowpass) and are slightly quieter — matching how the ear's pinna
-///      attenuates sounds from behind.
+/// Encodes three psychoacoustic cues:
+///   1. ILD (Interaural Level Difference): level attenuation on recessive ear
+///   2. ITD (Interaural Time Delay): up to 0.65ms delay on the far ear -- primary cue
+///   3. Front/back pinna simulation: rear sources get lowpass + volume reduction
 ///
-/// Input audio is assumed to be **mono** (TTS output), so both stereo output
-/// channels are derived from input channel c0.
+/// Input is assumed mono (TTS); both output channels source from c0.
 fn build_spatial_filter(angle_deg: f32) -> String {
     let angle_rad = angle_deg.to_radians();
-    let pan = angle_rad.sin(); // -1 (left) .. 0 (front/back) .. +1 (right)
-    let cos_val = angle_rad.cos(); // +1 = front, -1 = back
+    let pan = angle_rad.sin(); // azimuth: -1=left, 0=front/back, +1=right
+    let cos_val = angle_rad.cos(); // +1=front, -1=back
 
+    // ILD: level attenuation
     let left = 1.0_f32 - pan.max(0.0);
     let right = 1.0_f32 + pan.min(0.0);
     let pan_filter = format!("pan=stereo|c0={left:.4}*c0|c1={right:.4}*c0");
 
-    // back_depth: 0.0 at front (cos=+1), 1.0 directly behind (cos=-1)
-    let back_depth = (-cos_val).max(0.0);
-    if back_depth < 0.05 {
-        pan_filter
+    // ITD: time delay up to 0.65ms at 90 degrees - primary cue for lateral localisation
+    // Source on right: left ear hears it later, so delay left channel.
+    // Source on left:  right ear hears it later, so delay right channel.
+    let max_itd_ms = 0.65_f32;
+    let (left_delay_ms, right_delay_ms) = if pan > 0.0 {
+        (pan * max_itd_ms, 0.0_f32)
     } else {
-        // Simulate pinna occlusion: cut highs, reduce volume
-        let cutoff = (8000.0 - back_depth * 4000.0) as u32; // 8kHz → 4kHz
-        let volume = 1.0 - back_depth * 0.25; // 100% → 75%
-        format!("lowpass=f={cutoff},volume={volume:.4},{pan_filter}")
-    }
+        (0.0_f32, (-pan) * max_itd_ms)
+    };
+    let itd_filter = format!("adelay={left_delay_ms:.3}|{right_delay_ms:.3}");
+
+    // Front/back: pinna occlusion for rear sources
+    let back_depth = (-cos_val).max(0.0); // 0 at front, 1 directly behind
+    let mut parts: Vec<String> = if back_depth > 0.05 {
+        let cutoff = (8000.0 - back_depth * 4000.0) as u32;
+        let volume = 1.0 - back_depth * 0.25;
+        vec![format!("lowpass=f={cutoff}"), format!("volume={volume:.4}")]
+    } else {
+        vec![]
+    };
+
+    // Filter order: [rear EQ on mono source] -> pan (mono->stereo) -> ITD delay
+    parts.push(pan_filter);
+    parts.push(itd_filter);
+    parts.join(",")
 }
 
 /// Apply full spatial audio to a file using ffmpeg.
