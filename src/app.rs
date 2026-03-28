@@ -5,6 +5,10 @@ use std::{
     io::{Read, Write, stdout},
     process::{Child, Command, Stdio},
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -123,6 +127,10 @@ pub struct App {
     /// Per-channel stripe colours assigned in rotation.
     channel_colors: HashMap<String, Color>,
     toasts: VecDeque<ToastMessage>,
+    /// Monotonically increasing counter — incremented on every tab switch.
+    /// The spawned WebSocket subscription task compares against this to
+    /// discard stale requests (debounce rapid tab switching).
+    tab_switch_gen: Arc<AtomicU64>,
     /// Per-channel saved message history (saved/restored on channel switch)
     message_history: HashMap<String, VecDeque<MessageData>>,
 }
@@ -276,6 +284,7 @@ impl App {
             subscribed_channel: initial_channel,
             channel_colors: HashMap::new(),
             toasts: VecDeque::new(),
+            tab_switch_gen: Arc::new(AtomicU64::new(0)),
             message_history: HashMap::new(),
         }
     }
@@ -558,12 +567,25 @@ impl App {
         color
     }
 
+    /// Debounced WebSocket channel subscription: waits 300 ms after the last
+    /// tab switch and only subscribes if no newer switch has fired.
+    fn schedule_channel_subscribe(&self, channel: String) {
+        let switch_gen = self.tab_switch_gen.fetch_add(1, Ordering::Relaxed) + 1;
+        let gen_ref = self.tab_switch_gen.clone();
+        let tx = self.twitch_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            if gen_ref.load(Ordering::Relaxed) == switch_gen {
+                let _ = tx.send(TwitchAction::JoinChannel(channel)).await;
+            }
+        });
+    }
+
     fn tab_next(&mut self) {
         if self.channel_tabs.len() > 1 {
             let old_channel = self.current_channel();
             self.active_tab = (self.active_tab + 1) % self.channel_tabs.len();
             let new_channel = self.channel_tabs[self.active_tab].clone();
-            // Save/restore message history directly (bypasses handle_twitch_action).
             self.message_history
                 .insert(old_channel, self.messages.borrow().clone());
             let restored = self
@@ -575,10 +597,7 @@ impl App {
             self.components.chat.scroll_offset.jump_to(0);
             if new_channel != ALL_CHANNELS_TAB {
                 self.subscribed_channel.clone_from(&new_channel);
-                let tx = self.twitch_tx.clone();
-                tokio::spawn(async move {
-                    let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
-                });
+                self.schedule_channel_subscribe(new_channel);
             }
         }
     }
@@ -602,10 +621,7 @@ impl App {
             self.components.chat.scroll_offset.jump_to(0);
             if new_channel != ALL_CHANNELS_TAB {
                 self.subscribed_channel.clone_from(&new_channel);
-                let tx = self.twitch_tx.clone();
-                tokio::spawn(async move {
-                    let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
-                });
+                self.schedule_channel_subscribe(new_channel);
             }
         }
     }
@@ -632,10 +648,7 @@ impl App {
         self.components.chat.scroll_offset.jump_to(0);
         if new_channel != ALL_CHANNELS_TAB {
             self.subscribed_channel.clone_from(&new_channel);
-            let tx = self.twitch_tx.clone();
-            tokio::spawn(async move {
-                let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
-            });
+            self.schedule_channel_subscribe(new_channel);
         }
     }
 
