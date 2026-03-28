@@ -127,18 +127,18 @@ impl NotificationHandler {
                 let _ = std::io::stdout().flush();
             }
             SoundType::Beep => {
-                let volume = event_sounds.volume;
+                let volume = event_sounds.volume * (self.notifications_config.master_volume as f32 / 100.0);
                 let config = self.notifications_config.clone();
                 tokio::spawn(play_beep(config, volume));
             }
             SoundType::Default => {
-                let volume = event_sounds.volume;
+                let volume = event_sounds.volume * (self.notifications_config.master_volume as f32 / 100.0);
                 let config = self.notifications_config.clone();
                 tokio::spawn(play_default_sound_for_event(config, event_type, volume));
             }
             SoundType::File => {
                 if let Some(ref sound_file) = event_sounds.sound_file {
-                    let volume = event_sounds.volume;
+                    let volume = event_sounds.volume * (self.notifications_config.master_volume as f32 / 100.0);
                     let config = self.notifications_config.clone();
                     tokio::spawn(play_sound_file(config, sound_file.clone(), volume));
                 }
@@ -206,6 +206,21 @@ impl NotificationHandler {
             author: author.to_string(),
             text,
         });
+    }
+
+    /// Set the TTS master playback volume (0–100). Effective immediately for spatial TTS.
+    pub fn set_tts_volume(&mut self, volume: u8) {
+        self.tts_config.volume = volume;
+    }
+
+    /// Set the notification event-sound master volume (0–100). Effective on next event.
+    pub fn set_notification_master_volume(&mut self, volume: u8) {
+        self.notifications_config.master_volume = volume;
+    }
+
+    /// Enable or disable spatial 3-D TTS mode at runtime.
+    pub fn set_spatial(&mut self, enabled: bool) {
+        self.tts_config.spatial = enabled;
     }
 }
 

@@ -97,6 +97,8 @@ pub struct NotificationsConfig {
     pub output_device: String,
     /// Client/application name exposed to PipeWire/PulseAudio tools such as `EasyEffects`.
     pub output_client_name: String,
+    /// Master notification volume (0-100). Applied as a multiplier over per-event volumes.
+    pub master_volume: u8,
 }
 
 impl Default for NotificationsConfig {
@@ -148,6 +150,7 @@ impl Default for NotificationsConfig {
             output_backend: AudioOutputBackend::default(),
             output_device: String::new(),
             output_client_name: "twt".to_string(),
+            master_volume: 100,
         }
     }
 }

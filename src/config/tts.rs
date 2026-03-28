@@ -75,6 +75,8 @@ pub struct TtsConfig {
     /// 3D spatial audio mode: each speaker gets a deterministic stereo pan based on their username.
     /// Disables name-reading and queue (messages play immediately with possible overlap).
     pub spatial: bool,
+    /// Master TTS playback volume (0–100). Applied as amplitude multiplier during playback.
+    pub volume: u8,
     /// espeak-ng provider settings
     pub espeak_ng: EspeakNgTtsConfig,
     /// google-cloud provider settings
@@ -110,6 +112,7 @@ impl Default for TtsConfig {
             output_device: String::new(),
             output_client_name: "twt".to_string(),
             spatial: true,
+            volume: 100,
             espeak_ng: EspeakNgTtsConfig {
                 voice: "en-us".to_string(),
                 rate: 175,

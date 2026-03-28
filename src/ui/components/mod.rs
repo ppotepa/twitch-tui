@@ -11,6 +11,7 @@ mod following;
 mod help;
 mod message_search;
 mod state_tabs;
+mod volume_popup;
 pub mod utils;
 
 pub use channel_switcher::ChannelSwitcherWidget;
@@ -26,3 +27,4 @@ pub use following::FollowingWidget;
 pub use help::HelpWidget;
 pub use message_search::MessageSearchWidget;
 pub use state_tabs::StateTabsWidget;
+pub use volume_popup::{VolumePopup, PopupResult};

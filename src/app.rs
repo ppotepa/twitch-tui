@@ -34,7 +34,7 @@ use tui::{
 
 use crate::{
     audio::{apply_audio_client_env, apply_mpv_audio_options},
-    config::{AudioBackend, SharedCoreConfig},
+    config::{AudioBackend, CoreConfig, SharedCoreConfig, get_config_dir, persist_config},
     emotes::{
         ApplyCommand, DecodedEmote, DownloadedEmotes, Emotes, SharedEmotes, display_emote,
         query_emotes,
@@ -54,7 +54,7 @@ use crate::{
         api::{channels::get_channel_id, clips::create_clip, streams::get_stream_info},
         oauth::TwitchOauth,
     },
-    ui::components::{Component, Components},
+    ui::components::{Component, Components, PopupResult, VolumePopup},
     utils::sanitization::clean_channel_name,
 };
 
@@ -133,6 +133,10 @@ pub struct App {
     tab_switch_gen: Arc<AtomicU64>,
     /// Per-channel saved message history (saved/restored on channel switch)
     message_history: HashMap<String, VecDeque<MessageData>>,
+    /// Alt+V volume/settings popup; `None` when not visible.
+    volume_popup: Option<VolumePopup>,
+    /// Path to config.toml (for persisting popup edits).
+    config_path: std::path::PathBuf,
 }
 
 macro_rules! shared {
@@ -286,6 +290,8 @@ impl App {
             toasts: VecDeque::new(),
             tab_switch_gen: Arc::new(AtomicU64::new(0)),
             message_history: HashMap::new(),
+            volume_popup: None,
+            config_path: get_config_dir().join("config.toml"),
         }
     }
 
@@ -1353,6 +1359,11 @@ impl Component for App {
         // Stream status bar
         self.draw_status_bar(f, status_area);
         self.draw_toasts(f);
+
+        // Volume popup rendered last (on top of everything)
+        if let Some(ref popup) = self.volume_popup {
+            popup.draw(f);
+        }
     }
 
     async fn event(&mut self, event: &Event) -> Result<()> {
@@ -1375,6 +1386,23 @@ impl Component for App {
                     return self.components.debug.event(event).await;
                 }
 
+                // Volume popup intercepts all input when open
+                if self.volume_popup.is_some() {
+                    let result = self.volume_popup.as_mut().unwrap().handle_key(key);
+                    match result {
+                        PopupResult::Save => self.save_volume_settings(),
+                        PopupResult::Cancel => { self.volume_popup = None; }
+                        PopupResult::Continue => {}
+                    }
+                    return Ok(());
+                }
+
+                // Alt+V opens the volume popup
+                if key == &crate::events::Key::Alt('v') {
+                    self.open_volume_popup();
+                    return Ok(());
+                }
+
                 if self.config.keybinds.toggle_debug_focus.contains(key) {
                     self.components.debug.toggle_focus();
                 }
@@ -1387,5 +1415,43 @@ impl Component for App {
             State::Normal => self.components.chat.event(event).await,
             State::Help => self.components.help.event(event).await,
         }
+    }
+}
+
+impl App {
+    fn open_volume_popup(&mut self) {
+        let stream_audio = self.config.frontend.audio_volume;
+        let tts_volume = self.config.tts.volume;
+        let notif_volume = self.config.notifications.master_volume;
+        let spatial = self.config.tts.spatial;
+        self.volume_popup = Some(VolumePopup::new(stream_audio, tts_volume, notif_volume, spatial));
+    }
+
+    fn save_volume_settings(&mut self) {
+        let Some(ref popup) = self.volume_popup else { return; };
+
+        let stream_audio = popup.stream_audio();
+        let tts_vol      = popup.tts_volume();
+        let notif_vol    = popup.notif_volume();
+        let spatial      = popup.spatial_enabled();
+
+        // Update notification handler at runtime (spatial TTS picks this up immediately)
+        self.notification_handler.set_tts_volume(tts_vol);
+        self.notification_handler.set_notification_master_volume(notif_vol);
+        self.notification_handler.set_spatial(spatial);
+
+        // Build updated config and persist to disk
+        let mut new_cfg: CoreConfig = (*self.config).clone();
+        new_cfg.frontend.audio_volume        = stream_audio;
+        new_cfg.tts.volume                   = tts_vol;
+        new_cfg.notifications.master_volume  = notif_vol;
+        new_cfg.tts.spatial                  = spatial;
+
+        if let Err(e) = persist_config(&self.config_path, &new_cfg) {
+            warn!("Failed to persist volume settings: {e}");
+        }
+
+        self.config = std::sync::Arc::new(new_cfg);
+        self.volume_popup = None;
     }
 }

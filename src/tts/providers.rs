@@ -172,6 +172,7 @@ pub struct EspeakNgProvider {
     pub output_backend: AudioOutputBackend,
     pub output_device: String,
     pub output_client_name: String,
+    pub playback_volume: f32,
 }
 
 #[async_trait]
@@ -287,11 +288,12 @@ impl TtsBackend for EspeakNgProvider {
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
+        let playback_volume = self.playback_volume;
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, playback_volume),
             AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
                 &tmp_spatial_path,
-                1.0,
+                playback_volume,
                 &output_device,
                 &output_client_name,
             ),
@@ -310,6 +312,7 @@ pub struct GoogleCloudProvider {
     pub output_backend: AudioOutputBackend,
     pub output_device: String,
     pub output_client_name: String,
+    pub playback_volume: f32,
 }
 
 #[async_trait]
@@ -359,10 +362,11 @@ impl TtsBackend for GoogleCloudProvider {
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
+        let playback_volume = self.playback_volume;
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, playback_volume),
             AudioOutputBackend::Mpv => {
-                play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
+                play_file_with_mpv_blocking(&tmp_path, playback_volume, &output_device, &output_client_name)
             }
         })
         .await
@@ -382,6 +386,7 @@ pub struct EdgeTtsProvider {
     pub output_backend: AudioOutputBackend,
     pub output_device: String,
     pub output_client_name: String,
+    pub playback_volume: f32,
 }
 
 #[async_trait]
@@ -413,10 +418,11 @@ impl TtsBackend for EdgeTtsProvider {
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
+        let playback_volume = self.playback_volume;
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_path, playback_volume),
             AudioOutputBackend::Mpv => {
-                play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
+                play_file_with_mpv_blocking(&tmp_path, playback_volume, &output_device, &output_client_name)
             }
         })
         .await
@@ -479,11 +485,12 @@ impl TtsBackend for EdgeTtsProvider {
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
+        let playback_volume = self.playback_volume;
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, playback_volume),
             AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
                 &tmp_spatial_path,
-                1.0,
+                playback_volume,
                 &output_device,
                 &output_client_name,
             ),
@@ -511,6 +518,7 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
             output_backend: config.output_backend.clone(),
             output_device: config.output_device.clone(),
             output_client_name: config.output_client_name.clone(),
+            playback_volume: config.volume as f32 / 100.0,
         }),
         TtsProvider::GoogleCloud => Box::new(GoogleCloudProvider {
             voice_name: config
@@ -526,6 +534,7 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
             output_backend: config.output_backend.clone(),
             output_device: config.output_device.clone(),
             output_client_name: config.output_client_name.clone(),
+            playback_volume: config.volume as f32 / 100.0,
         }),
         TtsProvider::EdgeTts => Box::new(EdgeTtsProvider {
             voice: config
@@ -538,6 +547,7 @@ pub fn create_tts_provider(provider: &TtsProvider, config: &TtsConfig) -> Box<dy
             output_backend: config.output_backend.clone(),
             output_device: config.output_device.clone(),
             output_client_name: config.output_client_name.clone(),
+            playback_volume: config.volume as f32 / 100.0,
         }),
     }
 }
