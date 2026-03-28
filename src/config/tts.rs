@@ -72,6 +72,9 @@ pub struct TtsConfig {
     pub output_device: String,
     /// Client/application name exposed to PipeWire/PulseAudio tools such as `EasyEffects`.
     pub output_client_name: String,
+    /// 3D spatial audio mode: each speaker gets a deterministic stereo pan based on their username.
+    /// Disables name-reading and queue (messages play immediately with possible overlap).
+    pub spatial: bool,
     /// espeak-ng provider settings
     pub espeak_ng: EspeakNgTtsConfig,
     /// google-cloud provider settings
@@ -106,6 +109,7 @@ impl Default for TtsConfig {
             output_backend: AudioOutputBackend::default(),
             output_device: String::new(),
             output_client_name: "twt".to_string(),
+            spatial: false,
             espeak_ng: EspeakNgTtsConfig {
                 voice: "en-us".to_string(),
                 rate: 175,
