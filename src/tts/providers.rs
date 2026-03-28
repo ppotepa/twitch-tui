@@ -18,47 +18,39 @@ fn shell_escape_single_quotes(text: &str) -> String {
 
 /// Apply stereo panning to an audio file using ffmpeg.
 /// Pan range: -1.0 (full left) to 1.0 (full right), 0.0 (centre) = no panning.
-/// Returns the panned audio bytes.
+/// Input can be any format ffmpeg understands (mp3, wav, etc.).
+/// Output is always WAV (compatible with both rodio and mpv).
 async fn apply_pan_with_ffmpeg(
     input_path: &Path,
     pan: f32,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    // If pan is very close to 0, return the original file
     if pan.abs() < 0.01 {
         return Ok(tokio::fs::read(input_path).await?);
     }
 
-    // Create a temporary output file
+    let pan_clamped = pan.clamp(-1.0, 1.0);
+    // left level:  1.0 when pan≤0, attentuates to 0.0 at pan=+1
+    // right level: 1.0 when pan≥0, attentuates to 0.0 at pan=-1
+    let left_level = 1.0_f32 - pan_clamped.max(0.0);
+    let right_level = 1.0_f32 + pan_clamped.min(0.0);
+
+    let pan_filter = format!("pan=stereo|c0={left_level}*c0|c1={right_level}*c1");
+
     let tmp_out = NamedTempFile::with_suffix(".wav")?;
     let tmp_out_path = tmp_out.path().to_path_buf();
 
-    // ffmpeg pan filter: pan=stereo|c0=L_expr|c1=R_expr
-    // We want: pan left => reduce R, pan right => reduce L
-    // Clamp pan to [-1, 1]
-    let pan_clamped = pan.clamp(-1.0, 1.0);
-
-    // When pan=1 (full right): L channel plays at 0%, R at 100%
-    // When pan=-1 (full left): L channel plays at 100%, R at 0%
-    // When pan=0 (centre): both at 100%
-    let left_level = f32::midpoint(1.0 - pan_clamped, 1.0);
-    let right_level = f32::midpoint(1.0, pan_clamped);
-
-    let pan_filter = format!(
-        "pan=stereo|c0={left_level}*c0|c1={right_level}*c1"
-    );
-
-    let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-i")
+    let out = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-i")
         .arg(input_path)
         .arg("-af")
         .arg(&pan_filter)
-        .arg("-y") // Overwrite output file
-        .arg(&tmp_out_path);
+        .arg(&tmp_out_path)
+        .output()
+        .await?;
 
-    let output = cmd.output().await?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
         warn!("ffmpeg panning failed: {}", stderr);
         return Ok(tokio::fs::read(input_path).await?);
     }
@@ -191,9 +183,7 @@ impl TtsBackend for EspeakNgProvider {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             warn!("espeak-ng TTS failed: {}", stderr);
-            return Err(
-                std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into(),
-            );
+            return Err(std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into());
         }
 
         let tmp = NamedTempFile::with_suffix(".wav")?;
@@ -203,10 +193,9 @@ impl TtsBackend for EspeakNgProvider {
         f.flush().await?;
         drop(f);
 
-        // Apply panning via ffmpeg
+        // Apply panning via ffmpeg (outputs WAV — works with both rodio and mpv)
         let panned_audio = apply_pan_with_ffmpeg(&tmp_path, pan_value).await?;
 
-        // Write panned audio to another temp file
         let tmp_panned = NamedTempFile::with_suffix(".wav")?;
         let tmp_panned_path = tmp_panned.path().to_path_buf();
         let mut f_panned = File::create(&tmp_panned_path).await?;
@@ -214,15 +203,20 @@ impl TtsBackend for EspeakNgProvider {
         f_panned.flush().await?;
         drop(f_panned);
 
+        let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
-        tokio::task::spawn_blocking(move || {
-            play_file_with_mpv_blocking(&tmp_panned_path, 1.0, &output_device, &output_client_name)
+        tokio::task::spawn_blocking(move || match output_backend {
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_panned_path, 1.0),
+            AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
+                &tmp_panned_path,
+                1.0,
+                &output_device,
+                &output_client_name,
+            ),
         })
         .await
-        .map_err(|err| {
-            std::io::Error::other(format!("espeak-ng playback task failed: {err}"))
-        })??;
+        .map_err(|err| std::io::Error::other(format!("espeak-ng playback task failed: {err}")))??;
 
         Ok(())
     }
@@ -343,6 +337,70 @@ impl TtsBackend for EdgeTtsProvider {
             AudioOutputBackend::Mpv => {
                 play_file_with_mpv_blocking(&tmp_path, 1.0, &output_device, &output_client_name)
             }
+        })
+        .await
+        .map_err(|err| std::io::Error::other(format!("edge-tts playback task failed: {err}")))??;
+
+        Ok(())
+    }
+
+    async fn speak_with_pan(
+        &self,
+        text: &str,
+        pan: Option<f32>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if pan.is_none_or(|p| p.abs() < 0.01) {
+            return self.speak(text).await;
+        }
+
+        let pan_value = pan.unwrap_or(0.0);
+
+        // Step 1: generate TTS audio to mp3 via edge-tts
+        let tmp = NamedTempFile::with_suffix(".mp3")?;
+        let tmp_path = tmp.path().to_path_buf();
+
+        let synth = Command::new("edge-tts")
+            .arg("--voice")
+            .arg(&self.voice)
+            .arg("--rate")
+            .arg(&self.rate)
+            .arg("--volume")
+            .arg(&self.volume)
+            .arg("--text")
+            .arg(text)
+            .arg("--write-media")
+            .arg(&tmp_path)
+            .output()
+            .await?;
+
+        if !synth.status.success() {
+            let stderr = String::from_utf8_lossy(&synth.stderr);
+            warn!("edge-tts failed: {}", stderr);
+            return Err(std::io::Error::other(format!("edge-tts failed: {stderr}")).into());
+        }
+
+        // Step 2: apply stereo pan via ffmpeg (outputs WAV)
+        let panned_audio = apply_pan_with_ffmpeg(&tmp_path, pan_value).await?;
+
+        let tmp_panned = NamedTempFile::with_suffix(".wav")?;
+        let tmp_panned_path = tmp_panned.path().to_path_buf();
+        let mut f = File::create(&tmp_panned_path).await?;
+        f.write_all(&panned_audio).await?;
+        f.flush().await?;
+        drop(f);
+
+        // Step 3: play the panned WAV
+        let output_backend = self.output_backend.clone();
+        let output_device = self.output_device.clone();
+        let output_client_name = self.output_client_name.clone();
+        tokio::task::spawn_blocking(move || match output_backend {
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_panned_path, 1.0),
+            AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
+                &tmp_panned_path,
+                1.0,
+                &output_device,
+                &output_client_name,
+            ),
         })
         .await
         .map_err(|err| std::io::Error::other(format!("edge-tts playback task failed: {err}")))??;
