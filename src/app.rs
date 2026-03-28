@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fmt::Write as _,
     io::{Read, Write, stdout},
     process::{Child, Command, Stdio},
@@ -103,6 +103,8 @@ pub struct App {
     channel_tabs: Vec<String>,
     active_tab: usize,
     toasts: VecDeque<ToastMessage>,
+    /// Per-channel saved message history (saved/restored on channel switch)
+    message_history: HashMap<String, VecDeque<MessageData>>,
 }
 
 macro_rules! shared {
@@ -252,6 +254,7 @@ impl App {
             channel_tabs: vec![initial_channel],
             active_tab: 0,
             toasts: VecDeque::new(),
+            message_history: HashMap::new(),
         }
     }
 
@@ -577,6 +580,25 @@ impl App {
         self.components.chat.scroll_offset.jump_to(0);
     }
 
+    /// Save current channel's messages then load (or clear) messages for `new_channel`.
+    fn switch_channel_messages(&mut self, new_channel: &str) {
+        let current = self.current_channel();
+
+        // Save the current message list under the current channel name.
+        self.message_history
+            .insert(current, self.messages.borrow().clone());
+
+        // Restore saved messages for the new channel, or start with an empty list.
+        let restored = self
+            .message_history
+            .get(new_channel)
+            .cloned()
+            .unwrap_or_default();
+
+        *self.messages.borrow_mut() = restored;
+        self.components.chat.scroll_offset.jump_to(0);
+    }
+
     fn purge_user_messages(&self, user_id: &str) {
         let messages = self
             .messages
@@ -773,7 +795,7 @@ impl App {
         match twitch_action {
             TwitchAction::JoinChannel(channel) => {
                 let channel = clean_channel_name(channel);
-                self.clear_messages();
+                self.switch_channel_messages(&channel);
                 self.emotes.unload();
 
                 self.twitch_tx
