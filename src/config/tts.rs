@@ -109,7 +109,7 @@ impl Default for TtsConfig {
             output_backend: AudioOutputBackend::default(),
             output_device: String::new(),
             output_client_name: "twt".to_string(),
-            spatial: false,
+            spatial: true,
             espeak_ng: EspeakNgTtsConfig {
                 voice: "en-us".to_string(),
                 rate: 175,
