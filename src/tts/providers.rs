@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::json;
+use std::path::Path;
 use tempfile::NamedTempFile;
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 use tracing::warn;
@@ -13,6 +14,56 @@ use crate::{
 
 fn shell_escape_single_quotes(text: &str) -> String {
     text.replace('\'', "'\\''")
+}
+
+/// Apply stereo panning to an audio file using ffmpeg.
+/// Pan range: -1.0 (full left) to 1.0 (full right), 0.0 (centre) = no panning.
+/// Returns the panned audio bytes.
+async fn apply_pan_with_ffmpeg(
+    input_path: &Path,
+    pan: f32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    // If pan is very close to 0, return the original file
+    if pan.abs() < 0.01 {
+        return Ok(tokio::fs::read(input_path).await?);
+    }
+
+    // Create a temporary output file
+    let tmp_out = NamedTempFile::with_suffix(".wav")?;
+    let tmp_out_path = tmp_out.path().to_path_buf();
+
+    // ffmpeg pan filter: pan=stereo|c0=L_expr|c1=R_expr
+    // We want: pan left => reduce R, pan right => reduce L
+    // Clamp pan to [-1, 1]
+    let pan_clamped = pan.clamp(-1.0, 1.0);
+
+    // When pan=1 (full right): L channel plays at 0%, R at 100%
+    // When pan=-1 (full left): L channel plays at 100%, R at 0%
+    // When pan=0 (centre): both at 100%
+    let left_level = f32::midpoint(1.0 - pan_clamped, 1.0);
+    let right_level = f32::midpoint(1.0, pan_clamped);
+
+    let pan_filter = format!(
+        "pan=stereo|c0={left_level}*c0|c1={right_level}*c1"
+    );
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-i")
+        .arg(input_path)
+        .arg("-af")
+        .arg(&pan_filter)
+        .arg("-y") // Overwrite output file
+        .arg(&tmp_out_path);
+
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("ffmpeg panning failed: {}", stderr);
+        return Ok(tokio::fs::read(input_path).await?);
+    }
+
+    Ok(tokio::fs::read(&tmp_out_path).await?)
 }
 
 /// Festival TTS provider (local, requires festival installed)
@@ -111,6 +162,67 @@ impl TtsBackend for EspeakNgProvider {
                 })??;
             }
         }
+
+        Ok(())
+    }
+
+    async fn speak_with_pan(
+        &self,
+        text: &str,
+        pan: Option<f32>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // If no pan or pan is centre-ish, use normal speak
+        if pan.is_none_or(|p| p.abs() < 0.01) {
+            return self.speak(text).await;
+        }
+
+        let pan_value = pan.unwrap_or(0.0);
+
+        let mut cmd = Command::new("espeak-ng");
+        cmd.arg("-v")
+            .arg(&self.voice)
+            .arg("-s")
+            .arg(self.speed.to_string())
+            .arg("--stdout")
+            .arg(text);
+
+        let output = cmd.output().await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!("espeak-ng TTS failed: {}", stderr);
+            return Err(
+                std::io::Error::other(format!("espeak-ng TTS failed: {stderr}")).into(),
+            );
+        }
+
+        let tmp = NamedTempFile::with_suffix(".wav")?;
+        let tmp_path = tmp.path().to_path_buf();
+        let mut f = File::create(&tmp_path).await?;
+        f.write_all(&output.stdout).await?;
+        f.flush().await?;
+        drop(f);
+
+        // Apply panning via ffmpeg
+        let panned_audio = apply_pan_with_ffmpeg(&tmp_path, pan_value).await?;
+
+        // Write panned audio to another temp file
+        let tmp_panned = NamedTempFile::with_suffix(".wav")?;
+        let tmp_panned_path = tmp_panned.path().to_path_buf();
+        let mut f_panned = File::create(&tmp_panned_path).await?;
+        f_panned.write_all(&panned_audio).await?;
+        f_panned.flush().await?;
+        drop(f_panned);
+
+        let output_device = self.output_device.clone();
+        let output_client_name = self.output_client_name.clone();
+        tokio::task::spawn_blocking(move || {
+            play_file_with_mpv_blocking(&tmp_panned_path, 1.0, &output_device, &output_client_name)
+        })
+        .await
+        .map_err(|err| {
+            std::io::Error::other(format!("espeak-ng playback task failed: {err}"))
+        })??;
 
         Ok(())
     }
