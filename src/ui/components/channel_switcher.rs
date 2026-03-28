@@ -27,6 +27,7 @@ use crate::{
         statics::{NAME_MAX_CHARACTERS, NAME_RESTRICTION_REGEX},
     },
     utils::{
+        sanitization::clean_channel_name,
         search::{fuzzy_pattern_match, strict_pattern_match},
         styles::TITLE_STYLE,
         text::{TitleStyle, first_similarity, title_line},
@@ -302,7 +303,8 @@ impl Component for ChannelSwitcherWidget {
 
                         let selected_channel = if let Some(v) = &self.filtered_channels {
                             if v.is_empty() {
-                                let selected_channel = self.search_input.to_string();
+                                let selected_channel =
+                                    clean_channel_name(&self.search_input.to_string());
 
                                 if !selected_channel.is_empty() {
                                     if self.config.storage.channels {
@@ -326,6 +328,8 @@ impl Component for ChannelSwitcherWidget {
                             channels.get(i).unwrap()
                         };
 
+                        let selected_channel = clean_channel_name(selected_channel);
+
                         if self.config.storage.channels {
                             self.storage
                                 .borrow_mut()
@@ -334,21 +338,18 @@ impl Component for ChannelSwitcherWidget {
 
                         self.search_input.clear();
 
-                        debug!(
-                            "Joining previously joined channel {:?}",
-                            selected_channel.clone()
-                        );
+                        debug!("Joining previously joined channel {:?}", selected_channel);
 
                         self.event_tx
                             .send(Event::Twitch(TwitchEvent::Action(
-                                TwitchAction::JoinChannel(selected_channel.clone()),
+                                TwitchAction::JoinChannel(selected_channel),
                             )))
                             .await?;
                     } else if self.search_input.is_valid() {
                         self.toggle_focus();
                         self.unselect();
 
-                        let selected_channel = self.search_input.to_string();
+                        let selected_channel = clean_channel_name(&self.search_input.to_string());
 
                         if self.config.storage.channels {
                             self.storage

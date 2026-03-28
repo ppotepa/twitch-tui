@@ -16,7 +16,10 @@ use crate::{
     handlers::{state::State, storage::SharedStorage},
     twitch::oauth::TwitchOauth,
     ui::components::{ChannelSwitcherWidget, Component, FollowingWidget},
-    utils::styles::{DASHBOARD_SECTION_STYLE, DASHBOARD_TITLE_COLOR_STYLE, TEXT_DARK_STYLE},
+    utils::{
+        sanitization::clean_channel_name,
+        styles::{DASHBOARD_SECTION_STYLE, DASHBOARD_TITLE_COLOR_STYLE, TEXT_DARK_STYLE},
+    },
 };
 
 const DASHBOARD_TITLE: [&str; 5] = [
@@ -288,6 +291,7 @@ impl Component for DashboardWidget {
                             } as usize;
 
                         if let Some(channel) = channels.get(selection) {
+                            let channel = clean_channel_name(channel);
                             self.storage.borrow_mut().add("channels", channel.clone());
                             if selection != 0 && selection * 10 <= channels.len() {
                                 return Ok(());
@@ -295,7 +299,7 @@ impl Component for DashboardWidget {
                             self.channel_selection = None;
                             self.event_tx
                                 .send(Event::Twitch(TwitchEvent::Action(
-                                    TwitchAction::JoinChannel(channel.clone()),
+                                    TwitchAction::JoinChannel(channel),
                                 )))
                                 .await?;
 

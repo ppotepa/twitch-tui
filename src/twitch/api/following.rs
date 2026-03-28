@@ -17,14 +17,20 @@ const FOLLOWER_COUNT: usize = 100;
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct FollowingUser {
     broadcaster_login: String,
-    // broadcaster_id: String,
-    // broadcaster_name: String,
-    // followed_at: String,
+    /// Rich display string (viewer count, game, title) set for live channels.
+    /// Not deserialized from JSON — populated via `From<StreamingUser>`.
+    #[serde(skip)]
+    display: Option<String>,
 }
 
 impl Display for FollowingUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.broadcaster_login)
+        // Use the rich display string when available (live channels), otherwise plain login.
+        write!(
+            f,
+            "{}",
+            self.display.as_deref().unwrap_or(&self.broadcaster_login)
+        )
     }
 }
 
@@ -54,8 +60,11 @@ impl Display for StreamingUser {
 
 impl From<StreamingUser> for FollowingUser {
     fn from(value: StreamingUser) -> Self {
+        // Store only the login so the channel name passed to JoinChannel is always clean.
+        // The rich display (viewer count, game, title) is preserved in `display`.
         Self {
-            broadcaster_login: value.to_string(),
+            display: Some(value.to_string()),
+            broadcaster_login: value.user_login,
         }
     }
 }
