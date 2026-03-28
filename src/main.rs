@@ -21,20 +21,27 @@ use std::{rc::Rc, sync::Arc};
 use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr};
 use logging::initialize_logging;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use crate::{
     app::App,
+    boot::run_boot_screen,
     cli::args::Cli,
     commands::{init_terminal, reset_terminal},
     config::CoreConfig,
     emotes::{Emotes, initialize_emote_decoder},
     events::{Event, Events, TwitchAction},
-    twitch::{oauth::TwitchOauth, websocket::TwitchWebsocket},
+    twitch::{
+        chatters_poller::ChattersPoller,
+        oauth::TwitchOauth,
+        websocket::TwitchWebsocket,
+    },
 };
 
 mod app;
+mod audio;
+mod boot;
 mod cli;
 mod commands;
 mod config;
@@ -42,6 +49,8 @@ mod emotes;
 mod events;
 mod handlers;
 mod logging;
+mod notifications;
+mod tts;
 mod twitch;
 mod ui;
 mod utils;
@@ -86,9 +95,27 @@ async fn main() -> Result<()> {
         decoded_emotes_rx,
     );
 
-    TwitchWebsocket::new(config.clone(), twitch_oauth, event_tx.clone(), twitch_rx);
+    // Shared channel for notifying the chatters poller when the active channel changes
+    let (channel_watch_tx, channel_watch_rx) = watch::channel(None::<(String, String)>);
 
-    let terminal = init_terminal(&config.frontend);
+    TwitchWebsocket::new(
+        config.clone(),
+        twitch_oauth.clone(),
+        event_tx.clone(),
+        twitch_rx,
+        Arc::new(channel_watch_tx),
+    );
+
+    // Spawn the chatters poller if the client is available
+    if let Some(client) = twitch_oauth.client() {
+        let poll_interval = config.notifications.viewer_poll_interval_secs;
+        ChattersPoller::new(client, channel_watch_rx, event_tx.clone(), poll_interval).spawn();
+    } else {
+        warn!("Twitch client not available, chatters poller will not run");
+    }
+
+    let mut terminal = init_terminal(&config.frontend);
+    run_boot_screen(&mut terminal, &config, &twitch_oauth).await;
     app.run(terminal).await?;
 
     reset_terminal();

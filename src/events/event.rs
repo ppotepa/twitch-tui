@@ -20,12 +20,29 @@ pub enum Event {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamStatusInfo {
+    pub viewer_count: u64,
+    pub title: String,
+    pub game_name: String,
+    pub uptime_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InternalEvent {
     Quit,
     BackOneLayer,
     SwitchState(State),
     OpenStream(String),
     SelectEmote(String),
+    CreateClip,
+    StreamInfoUpdate(Option<StreamStatusInfo>),
+    ToggleAudio,
+    ToggleTts,
+    ToggleStreamViewer,
+    TabNew,
+    TabNext,
+    TabPrev,
+    TabClose,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,4 +62,7 @@ pub enum TwitchNotification {
     Message(RawMessageData),
     ClearChat(Option<String>),
     DeleteMessage(String),
+    UserJoin(String),
+    UserLeave(String),
+    Raid(String, u32),
 }

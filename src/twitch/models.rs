@@ -123,6 +123,13 @@ impl ReceivedTwitchEventReply {
     }
 }
 
+/// Raid info embedded in a channel.chat.notification event with notice_type = "raid"
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ReceivedTwitchEventRaid {
+    pub user_name: String,
+    pub viewer_count: u32,
+}
+
 /// All attributes that are to come through during a channel chat notification event
 ///
 /// <https://dev.twitch.tv/docs/eventsub/eventsub-reference/#channel-chat-notification-event>
@@ -139,6 +146,8 @@ pub struct ReceivedTwitchEvent {
     message_type: Option<String>,
     message: Option<ReceivedTwitchEventMessage>,
     system_message: Option<String>,
+    notice_type: Option<String>,
+    raid: Option<ReceivedTwitchEventRaid>,
     badges: Option<Vec<ReceivedTwitchEventBadges>>,
     cheer: Option<ReceivedTwitchEventCheer>,
     reply: Option<ReceivedTwitchEventReply>,
@@ -256,6 +265,14 @@ impl ReceivedTwitchEvent {
 
     pub const fn user_name(&self) -> Option<&String> {
         self.user_name.as_ref()
+    }
+
+    pub const fn notice_type(&self) -> Option<&String> {
+        self.notice_type.as_ref()
+    }
+
+    pub const fn raid(&self) -> Option<&ReceivedTwitchEventRaid> {
+        self.raid.as_ref()
     }
 }
 

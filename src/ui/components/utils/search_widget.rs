@@ -22,7 +22,7 @@ use crate::{
     ui::components::{Component, ErrorWidget},
     utils::{
         sanitization::clean_channel_name,
-        search::fuzzy_pattern_match,
+        search::{fuzzy_pattern_match, strict_pattern_match},
         styles::{NO_COLOR, SEARCH_STYLE, TITLE_STYLE},
         text::{TitleStyle, title_line},
     },
@@ -170,18 +170,33 @@ where
 
             self.filtered_items = None;
         } else {
-            let item_filter =
-                |choice: String| -> Vec<usize> { fuzzy_pattern_match(&current_input, &choice) };
-
-            let mut matched = vec![];
+            let mut strict_matches = vec![];
+            let mut fuzzy_matches = vec![];
 
             for item in current_items.clone() {
-                let matched_indices = item_filter(item.to_string());
+                let item_string = item.to_string();
+                let strict_indices = strict_pattern_match(&current_input, &item_string);
 
-                if matched_indices.is_empty() {
+                if !strict_indices.is_empty() {
+                    strict_matches.push((item, strict_indices));
                     continue;
                 }
 
+                let fuzzy_indices = fuzzy_pattern_match(&current_input, &item_string);
+                if !fuzzy_indices.is_empty() {
+                    fuzzy_matches.push((item, fuzzy_indices));
+                }
+            }
+
+            let matched_results = if strict_matches.is_empty() {
+                fuzzy_matches
+            } else {
+                strict_matches
+            };
+
+            let mut matched = vec![];
+
+            for (item, matched_indices) in matched_results {
                 let line = item
                     .to_string()
                     .chars()

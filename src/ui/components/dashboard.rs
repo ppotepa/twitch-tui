@@ -45,7 +45,7 @@ impl DashboardWidget {
     ) -> Self {
         let channel_input =
             ChannelSwitcherWidget::new(config.clone(), event_tx.clone(), storage.clone());
-        let following = FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone());
+        let following = FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone(), false);
         let switcher_count = None;
 
         Self {

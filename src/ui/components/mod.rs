@@ -1,6 +1,7 @@
 mod channel_switcher;
 mod chat;
 mod chat_input;
+mod chat_stats;
 mod component;
 mod dashboard;
 mod debug;
@@ -15,6 +16,7 @@ pub mod utils;
 pub use channel_switcher::ChannelSwitcherWidget;
 pub use chat::ChatWidget;
 pub use chat_input::ChatInputWidget;
+pub use chat_stats::ChatStatsWidget;
 pub use component::{Component, Components};
 pub use dashboard::DashboardWidget;
 pub use debug::DebugWidget;

@@ -19,8 +19,8 @@ use crate::{
     handlers::{data::MessageData, filters::SharedFilters, state::State, storage::SharedStorage},
     twitch::oauth::TwitchOauth,
     ui::components::{
-        ChannelSwitcherWidget, ChatInputWidget, Component, FollowingWidget, MessageSearchWidget,
-        utils::Scrolling,
+        ChannelSwitcherWidget, ChatInputWidget, ChatStatsWidget, Component, FollowingWidget,
+        MessageSearchWidget, utils::Scrolling,
     },
     utils::{
         styles::{NO_COLOR, TEXT_DARK_STYLE, TITLE_STYLE},
@@ -36,10 +36,11 @@ pub struct ChatWidget {
     channel_input: ChannelSwitcherWidget,
     search_input: MessageSearchWidget,
     following: FollowingWidget,
+    live_following: FollowingWidget,
+    chat_stats: ChatStatsWidget,
     filters: SharedFilters,
     pub scroll_offset: Scrolling,
     current_channel_name: String,
-    // theme: Theme,
 }
 
 impl ChatWidget {
@@ -63,7 +64,10 @@ impl ChatWidget {
         let channel_input =
             ChannelSwitcherWidget::new(config.clone(), event_tx.clone(), storage.clone());
         let search_input = MessageSearchWidget::new(config.clone(), event_tx.clone());
-        let following = FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone());
+        let following =
+            FollowingWidget::new(config.clone(), twitch_oauth.clone(), event_tx.clone(), false);
+        let live_following = FollowingWidget::new(config.clone(), twitch_oauth, event_tx.clone(), true);
+        let chat_stats = ChatStatsWidget::new(messages.clone());
 
         let scroll_offset = Scrolling::new(config.frontend.inverted_scrolling);
 
@@ -75,6 +79,8 @@ impl ChatWidget {
             channel_input,
             search_input,
             following,
+            live_following,
+            chat_stats,
             filters,
             scroll_offset,
             current_channel_name,
@@ -301,7 +307,12 @@ impl Component for ChatWidget {
             self.search_input.draw(f, v_chunks.next().copied());
         } else if self.following.is_focused() {
             self.following.draw(f, None);
+        } else if self.live_following.is_focused() {
+            self.live_following.draw(f, None);
         }
+
+        // Chat stats overlay (drawn on top of everything)
+        self.chat_stats.draw(f, Some(r));
     }
 
     async fn event(&mut self, event: &Event) -> Result<()> {
@@ -317,6 +328,8 @@ impl Component for ChatWidget {
             return self.search_input.event(event).await;
         } else if self.following.is_focused() {
             return self.following.event(event).await;
+        } else if self.live_following.is_focused() {
+            return self.live_following.event(event).await;
         }
 
         if let Event::Input(key) = event {
@@ -339,7 +352,19 @@ impl Component for ChatWidget {
                     self.search_input.toggle_focus();
                 }
                 key if keybinds.followed_channels_search.contains(key) => {
+                    if self.live_following.is_focused() {
+                        self.live_following.toggle_focus().await;
+                    }
                     self.following.toggle_focus().await;
+                }
+                key if keybinds.live_channels.contains(key) => {
+                    if self.following.is_focused() {
+                        self.following.toggle_focus().await;
+                    }
+                    self.live_following.toggle_focus().await;
+                }
+                key if keybinds.chat_stats.contains(key) => {
+                    self.chat_stats.toggle();
                 }
                 key if keybinds.toggle_filters.contains(key) => {
                     let mut filters = self.filters.borrow_mut();
@@ -372,6 +397,46 @@ impl Component for ChatWidget {
                 key if keybinds.open_in_player.contains(key) => {
                     self.open_in_player().await?;
                 }
+                key if keybinds.create_clip.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::CreateClip))
+                        .await?;
+                }
+                key if keybinds.audio_toggle.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::ToggleAudio))
+                        .await?;
+                }
+                key if keybinds.tts_toggle.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::ToggleTts))
+                        .await?;
+                }
+                key if keybinds.stream_viewer.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::ToggleStreamViewer))
+                        .await?;
+                }
+                key if keybinds.tab_new.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::TabNew))
+                        .await?;
+                }
+                key if keybinds.tab_next.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::TabNext))
+                        .await?;
+                }
+                key if keybinds.tab_prev.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::TabPrev))
+                        .await?;
+                }
+                key if keybinds.tab_close.contains(key) => {
+                    self.event_tx
+                        .send(Event::Internal(InternalEvent::TabClose))
+                        .await?;
+                }
                 key if keybinds.scroll_to_end.contains(key) => {
                     self.scroll_offset.jump_to(0);
                 }
@@ -380,6 +445,10 @@ impl Component for ChatWidget {
                     self.scroll_offset.jump_to(self.messages.borrow().len());
                 }
                 key if keybinds.back_to_previous_window.contains(key) => {
+                    if self.chat_stats.visible {
+                        self.chat_stats.visible = false;
+                        return Ok(());
+                    }
                     if self.scroll_offset.get_offset() == 0 {
                         self.event_tx
                             .send(Event::Internal(InternalEvent::BackOneLayer))

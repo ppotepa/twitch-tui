@@ -10,11 +10,8 @@ use crate::ui::components::utils::SearchItemGetter;
 
 impl SearchItemGetter<String> for Following {
     async fn get_items(&mut self) -> Result<Vec<String>> {
-        let following = get_following(
-            self.twitch_oauth.clone(),
-            self.config.frontend.only_get_live_followed_channels,
-        )
-        .await;
+        let live = self.live_only || self.config.frontend.only_get_live_followed_channels;
+        let following = get_following(self.twitch_oauth.clone(), live).await;
 
         following.map(|v| {
             v.data

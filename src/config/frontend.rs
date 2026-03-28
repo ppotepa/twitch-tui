@@ -62,6 +62,18 @@ pub struct FrontendConfig {
     pub show_unsupported_screen_size: bool,
     /// Only show followed channels that are currently live.
     pub only_get_live_followed_channels: bool,
+    /// Command to use for audio-only stream playback (channel URL appended). e.g. ["mpv", "--no-video"]
+    pub audio_command: Vec<String>,
+    /// Stream audio volume shown in the status bar and passed to mpv if not set in audio_command.
+    pub audio_volume: u8,
+    /// Restart audio when switching the active chat/channel.
+    pub audio_follow_channel_switch: bool,
+    /// Stream audio backend: mpv or streamlink
+    pub audio_backend: AudioBackend,
+    /// Output device/sink for stream audio (empty = system default)
+    pub audio_output_device: String,
+    /// OBS-friendly mode: routes all audio through unified backend
+    pub audio_obs_mode: bool,
 }
 
 impl FrontendConfig {
@@ -103,6 +115,20 @@ impl Default for FrontendConfig {
             right_align_usernames: false,
             show_unsupported_screen_size: true,
             only_get_live_followed_channels: false,
+            audio_command: vec![
+                "mpv".to_string(),
+                "--no-video".to_string(),
+                "--cache=yes".to_string(),
+                "--cache-secs=30".to_string(),
+                "--demuxer-readahead-secs=30".to_string(),
+                "--demuxer-max-bytes=128M".to_string(),
+                "--stream-buffer-size=4M".to_string(),
+            ],
+            audio_volume: 85,
+            audio_follow_channel_switch: true,
+            audio_backend: AudioBackend::default(),
+            audio_output_device: String::new(),
+            audio_obs_mode: false,
         }
     }
 }
@@ -171,6 +197,14 @@ impl From<FrontendConfig> for Vec<(String, String)> {
                 "Recent channel count".to_string(),
                 config.recent_channel_count.to_string(),
             ),
+            ("Audio volume".to_string(), config.audio_volume.to_string()),
+            (
+                "Audio follows channel switch".to_string(),
+                config.audio_follow_channel_switch.to_string(),
+            ),
+            ("Audio backend".to_string(), format!("{:?}", config.audio_backend)),
+            ("Audio output device".to_string(), config.audio_output_device.clone()),
+            ("Audio OBS mode".to_string(), config.audio_obs_mode.to_string()),
             // ("".to_string(), val.border_type.to_string()),
             (
                 "Right aligned usernames".to_string(),
@@ -202,6 +236,21 @@ impl FromStr for Palette {
             "cool" => Ok(Self::Cool),
             _ => bail!("Palette '{}' cannot be deserialized", s),
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioBackend {
+    /// Use mpv for stream audio (default)
+    Mpv,
+    /// Use streamlink for stream audio (better Twitch stability)
+    Streamlink,
+}
+
+impl Default for AudioBackend {
+    fn default() -> Self {
+        Self::Mpv
     }
 }
 

@@ -82,6 +82,7 @@ impl EventsThread {
             KeyCode::Delete => Key::Delete,
             KeyCode::Insert => Key::Insert,
             KeyCode::Tab => Key::Tab,
+            KeyCode::BackTab => Key::BackTab,
             KeyCode::Enter => Key::Enter,
             KeyCode::Char(c) => match modifiers {
                 KeyModifiers::NONE | KeyModifiers::SHIFT => Key::Char(c),

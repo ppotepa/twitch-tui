@@ -18,6 +18,7 @@ tokio = { version = "1.44.2", features = [
     "macros",
     "rt-multi-thread",
     "fs",
+    "process",
 ] }
 tokio-tungstenite = { version = "0.26.2", features = ["native-tls"] }
 clap = { version = "4.5.37", features = ["derive", "cargo"] }
@@ -47,6 +48,8 @@ webbrowser = "1.0.4"
 memchr = "2.7.4"
 bon = "3.8.2"
 directories = "6.0.0"
+rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis", "mp3"] }
+async-trait = "0.1.89"
 
 [target.'cfg(not(windows))'.dependencies]
 tui = { package = "ratatui", version = "0.30.0", default-features = false, features = [

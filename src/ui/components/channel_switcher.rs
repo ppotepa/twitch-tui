@@ -27,7 +27,7 @@ use crate::{
         statics::{NAME_MAX_CHARACTERS, NAME_RESTRICTION_REGEX},
     },
     utils::{
-        search::fuzzy_pattern_match,
+        search::{fuzzy_pattern_match, strict_pattern_match},
         styles::TITLE_STYLE,
         text::{TitleStyle, first_similarity, title_line},
     },
@@ -158,17 +158,32 @@ impl Component for ChannelSwitcherWidget {
 
             self.filtered_channels = None;
         } else {
-            let channel_filter =
-                |choice: String| -> Vec<usize> { fuzzy_pattern_match(&current_input, &choice) };
+            let mut strict_matches = vec![];
+            let mut fuzzy_matches = vec![];
+
+            for channel in channels.clone() {
+                let strict_indices = strict_pattern_match(&current_input, &channel);
+
+                if !strict_indices.is_empty() {
+                    strict_matches.push((channel, strict_indices));
+                    continue;
+                }
+
+                let fuzzy_indices = fuzzy_pattern_match(&current_input, &channel);
+                if !fuzzy_indices.is_empty() {
+                    fuzzy_matches.push((channel, fuzzy_indices));
+                }
+            }
+
+            let matched_results = if strict_matches.is_empty() {
+                fuzzy_matches
+            } else {
+                strict_matches
+            };
 
             let mut matched = vec![];
 
-            for channel in channels.clone() {
-                let matched_indices = channel_filter(channel.clone());
-
-                if matched_indices.is_empty() {
-                    continue;
-                }
+            for (channel, matched_indices) in matched_results {
 
                 let line = channel
                     .chars()

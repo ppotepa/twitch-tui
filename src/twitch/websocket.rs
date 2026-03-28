@@ -9,6 +9,7 @@ use crate::{
     events::{Event, TwitchAction},
     handlers::{data::DataBuilder, state::State},
     twitch::{
+        chatters_poller::ChannelWatchTx,
         context::TwitchWebsocketContext,
         handlers::{
             incoming_message::handle_incoming_message,
@@ -31,11 +32,13 @@ impl TwitchWebsocket {
         twitch_oauth: TwitchOauth,
         event_tx: Sender<Event>,
         twitch_rx: Receiver<TwitchAction>,
+        channel_watch_tx: ChannelWatchTx,
     ) -> Self {
         let mut context = TwitchWebsocketContext::default();
         context.set_oauth(Some(twitch_oauth));
 
-        let mut actor = TwitchWebsocketThread::new(config, context, event_tx, twitch_rx);
+        let mut actor =
+            TwitchWebsocketThread::new(config, context, event_tx, twitch_rx, channel_watch_tx);
         tokio::task::spawn(async move { actor.run().await });
 
         Self {}
@@ -55,20 +58,53 @@ pub struct TwitchWebsocketThread {
     context: TwitchWebsocketContext,
     event_tx: Sender<Event>,
     action_rx: Receiver<TwitchAction>,
+    channel_watch_tx: ChannelWatchTx,
 }
 
 impl TwitchWebsocketThread {
-    const fn new(
+    fn new(
         config: SharedCoreConfig,
         context: TwitchWebsocketContext,
         event_tx: Sender<Event>,
         action_rx: Receiver<TwitchAction>,
+        channel_watch_tx: ChannelWatchTx,
     ) -> Self {
         Self {
             config,
             context,
             event_tx,
             action_rx,
+            channel_watch_tx,
+        }
+    }
+
+    /// Notify the chatters poller of the currently active channel.
+    /// Only sends when the current channel matches the configured own channel
+    /// (controlled by `notifications.chatters_own_channel_only`).
+    fn notify_channel_watch(&self) {
+        let cfg = &self.config.notifications;
+        if cfg.chatters_own_channel_only {
+            let own_channel = if cfg.chatters_channel.is_empty() {
+                &self.config.twitch.channel
+            } else {
+                &cfg.chatters_channel
+            };
+            let current = self.context.channel_name().map(|s| s.to_lowercase());
+            if current.as_deref() != Some(own_channel.to_lowercase().as_str()) {
+                // Silence the poller for channels that aren't ours
+                let _ = self.channel_watch_tx.send(None);
+                return;
+            }
+        }
+
+        if let (Some(channel_id), Some(oauth)) =
+            (self.context.channel_id(), self.context.oauth())
+        {
+            if let Some(user_id) = oauth.user_id() {
+                let _ = self
+                    .channel_watch_tx
+                    .send(Some((channel_id.clone(), user_id)));
+            }
         }
     }
 
@@ -132,6 +168,9 @@ impl TwitchWebsocketThread {
             bail!(error_message);
         }
 
+        // Notify chatters poller of initial channel
+        self.notify_channel_watch();
+
         Ok(stream)
     }
 
@@ -185,6 +224,8 @@ impl TwitchWebsocketThread {
             }
             TwitchAction::JoinChannel(channel_name) => {
                 handle_channel_join(&mut self.context, &self.event_tx, channel_name, false).await?;
+                // Update the chatters poller with the new channel
+                self.notify_channel_watch();
             }
         }
 
@@ -207,3 +248,4 @@ impl TwitchWebsocketThread {
         .await
     }
 }
+

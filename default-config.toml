@@ -108,6 +108,31 @@ show_unsupported_screen_size = true
 # The following widget will only contain channels that are currently live
 only_get_live_followed_channels = false
 
+# Audio streaming configuration
+# Backend for stream audio: "mpv" (default) or "streamlink" (better Twitch stability)
+audio_backend = "mpv"
+# Command to play audio-only stream. Supports {url} placeholder (e.g., ["mpv", "--no-video", "{url}"])
+# Default mpv args include buffering for stable playback.
+audio_command = [
+    "mpv",
+    "--no-video",
+    "--cache=yes",
+    "--cache-secs=30",
+    "--demuxer-readahead-secs=30",
+    "--demuxer-max-bytes=128M",
+    "--stream-buffer-size=4M",
+    "{url}"
+]
+# Stream audio volume (0-100)
+audio_volume = 85
+# Restart audio when switching channels
+audio_follow_channel_switch = true
+# Output device/sink for stream audio (empty = system default)
+audio_output_device = ""
+# OBS-friendly mode: routes all audio through unified backend for consistent capture
+# When enabled, consider using a virtual sink and configuring PipeWire/Pulseaudio monitor
+audio_obs_mode = false
+
 [keybinds]
 # Open the debug window
 toggle_debug_focus = ["Ctrl+d"]
@@ -211,3 +236,100 @@ delete_item = ["Ctrl+d"]
 select = ["Enter"]
 # Go back to the previous window
 back_to_previous_window = ["Esc"]
+
+[notifications]
+# Enable sound notifications
+enabled = false
+# When to trigger: "all" (every message), "mentions" (when your username is mentioned), or "specific" (specific users)
+trigger = "mentions"
+# List of specific usernames to trigger on (only used if trigger = "specific")
+trigger_users = []
+# How often (in seconds) to poll Twitch for the current viewer/chatter list.
+# Requires the `moderator:read:chatters` OAuth scope on your token.
+viewer_poll_interval_secs = 30
+# Message shown in chat when a viewer joins. Use {user} as placeholder.
+join_message = "👋 @{user} joined"
+# Message shown in chat when a viewer leaves. Use {user} as placeholder.
+leave_message = "👋 @{user} left"
+
+# Chat message notifications
+[notifications.messages]
+enabled = true
+# Type: "bell" (terminal beep), "beep" (generated tone), "default" (embedded sound), or "file" (custom file)
+sound_type = "default"
+sound_file = ""
+volume = 0.5
+
+# User join notifications (plays enter.wav by default)
+[notifications.joins]
+enabled = true
+sound_type = "default"
+sound_file = ""
+volume = 0.3
+
+# User leave notifications (plays leave.wav by default)
+[notifications.leaves]
+enabled = true
+sound_type = "default"
+sound_file = ""
+volume = 0.3
+
+# Raid notifications
+[notifications.raids]
+enabled = true
+sound_type = "default"
+sound_file = ""
+volume = 0.8
+
+# Enable saving @mention highlights to a log file
+highlight_log_enabled = false
+# Path to highlights log file
+highlight_log_path = "~/.local/share/twt/highlights.log"
+# Only track viewer join/leave on your own channel (recommended - requires broadcaster/moderator scope)
+chatters_own_channel_only = true
+# Your channel name for chatters tracking (leave empty to auto-detect from token)
+chatters_channel = ""
+# Audio backend for notifications: "rodio" (local synthesis) or "mpv" (system audio, better for OBS)
+output_backend = "rodio"
+# Output device/sink for notifications (empty = system default)
+output_device = ""
+
+[tts]
+# Enable text-to-speech for chat messages
+enabled = false
+# Ordered fallback chain — tries each provider in order until one succeeds
+# Available: "edge-tts", "festival", "espeak-ng", "google-cloud"
+providers = ["edge-tts", "espeak-ng"]
+# When to trigger TTS: "all", "mentions", or "specific"
+trigger = "mentions"
+# List of specific usernames to trigger TTS (only used if trigger = "specific")
+trigger_users = []
+# Maximum message length to speak (prevents very long messages)
+max_length = 200
+# Skip TTS for own messages
+skip_self = true
+# Only speak when your own stream is live
+only_when_streaming = false
+# Usernames to skip (bots)
+skip_users = ["streamelements", "nightbot", "moobot", "fossabot", "streamlabs", "soundalerts"]
+# Maximum messages queued for TTS
+max_queue_depth = 3
+# Audio backend for TTS: "rodio" (local) or "mpv" (system audio, better for OBS)
+output_backend = "rodio"
+# Output device/sink for TTS (empty = system default)
+output_device = ""
+
+[tts.edge_tts]
+# Free Microsoft Edge neural voices — requires `edge-tts` Python package:
+#   pip install edge-tts --break-system-packages
+# List voices: edge-tts --list-voices
+voice = "en-US-JennyNeural"
+
+[tts.espeak_ng]
+voice = "en-us"
+rate = 175
+
+[tts.google_cloud]
+# Requires GOOGLE_API_KEY env var with Text-to-Speech API enabled.
+voice = "en-US-Wavenet-F"
+language_code = "en-US"

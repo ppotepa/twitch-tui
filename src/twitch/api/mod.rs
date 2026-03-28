@@ -1,5 +1,8 @@
 pub mod channel_information;
+pub mod chatters;
 pub mod channels;
+pub mod clips;
+pub mod streams;
 pub mod chat_settings;
 pub mod clear;
 pub mod commercial;

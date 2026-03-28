@@ -33,6 +33,7 @@ pub struct StreamingUser {
     pub user_login: String,
     pub game_name: String,
     pub title: String,
+    pub viewer_count: u64,
 }
 
 impl Display for StreamingUser {
@@ -41,9 +42,10 @@ impl Display for StreamingUser {
             user_login,
             game_name,
             title,
+            viewer_count,
         } = self;
-        let fmt_game = format!("[{game_name:.22}]");
-        write!(f, "{user_login:<25.25}: {fmt_game:<24} {title}")
+        let fmt_game = format!("[{game_name:.20}]");
+        write!(f, "{user_login:<20.20} {viewer_count:>7}👥  {fmt_game:<22} {title:.40}")
     }
 }
 
@@ -90,15 +92,17 @@ impl From<LiveChannelList> for FollowingChannelList {
 pub struct Following {
     pub config: SharedCoreConfig,
     pub twitch_oauth: TwitchOauth,
+    pub live_only: bool,
     #[allow(unused)]
     list: FollowingChannelList,
 }
 
 impl Following {
-    pub fn new(config: SharedCoreConfig, twitch_oauth: TwitchOauth) -> Self {
+    pub fn new(config: SharedCoreConfig, twitch_oauth: TwitchOauth, live_only: bool) -> Self {
         Self {
             config,
             twitch_oauth,
+            live_only,
             list: FollowingChannelList::default(),
         }
     }
@@ -110,19 +114,26 @@ pub async fn get_user_following(
     user_id: &str,
     live: bool,
 ) -> Result<FollowingChannelList> {
-    let channels = if live {
+    let mut channels = if live {
         let url = format!(
             "{TWITCH_API_BASE_URL}/streams/followed?user_id={user_id}&first={FOLLOWER_COUNT}",
         );
 
-        client
+        let mut live_channels: LiveChannelList = client
             .get(url)
             .send()
             .await?
             .error_for_status()?
             .json::<LiveChannelList>()
-            .await?
-            .into()
+            .await?;
+
+        live_channels.data.sort_by(|a, b| {
+            b.viewer_count
+                .cmp(&a.viewer_count)
+                .then_with(|| a.user_login.to_lowercase().cmp(&b.user_login.to_lowercase()))
+        });
+
+        live_channels.into()
     } else {
         let url = format!(
             "{TWITCH_API_BASE_URL}/channels/followed?user_id={user_id}&first={FOLLOWER_COUNT}",
@@ -136,6 +147,10 @@ pub async fn get_user_following(
             .json::<FollowingChannelList>()
             .await?
     };
+
+    if !live {
+        channels.data.sort_by_key(|channel| channel.broadcaster_login.to_lowercase());
+    }
 
     Ok(channels)
 }

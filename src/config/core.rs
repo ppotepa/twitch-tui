@@ -16,9 +16,11 @@ use crate::{
         filters::FiltersConfig,
         frontend::FrontendConfig,
         keybinds::KeybindsConfig,
+        notifications::NotificationsConfig,
         persistence::{get_cache_dir, get_config_dir, persist_config, persist_default_config},
         storage::StorageConfig,
         terminal::TerminalConfig,
+        tts::TtsConfig,
         twitch::TwitchConfig,
     },
     emotes::support_graphics_protocol,
@@ -39,6 +41,10 @@ pub struct CoreConfig {
     pub frontend: FrontendConfig,
     /// Keybinds for each state.
     pub keybinds: KeybindsConfig,
+    /// Sound notifications.
+    pub notifications: NotificationsConfig,
+    /// Text-to-speech for messages.
+    pub tts: TtsConfig,
 }
 
 pub type SharedCoreConfig = Arc<CoreConfig>;

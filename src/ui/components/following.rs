@@ -28,8 +28,9 @@ impl FollowingWidget {
         config: SharedCoreConfig,
         twitch_oauth: TwitchOauth,
         event_tx: Sender<Event>,
+        live_only: bool,
     ) -> Self {
-        let item_getter = Following::new(config.clone(), twitch_oauth);
+        let item_getter = Following::new(config.clone(), twitch_oauth, live_only);
 
         let search_widget = SearchWidget::new(
             config,

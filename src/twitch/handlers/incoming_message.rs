@@ -23,6 +23,20 @@ async fn handle_chat_notification(
 ) -> Result<()> {
     match subscription_type {
         Subscription::Notification => {
+            // Intercept raid notices for special handling
+            if event.notice_type().map(String::as_str) == Some("raid") {
+                if let Some(raid) = event.raid() {
+                    event_tx
+                        .send(Event::Twitch(TwitchEvent::Notification(
+                            TwitchNotification::Raid(
+                                raid.user_name.clone(),
+                                raid.viewer_count,
+                            ),
+                        )))
+                        .await?;
+                }
+                return Ok(());
+            }
             if let Some(twitch_notification_message) = event.system_message() {
                 event_tx
                     .send(DataBuilder::twitch(twitch_notification_message.clone()).into())
