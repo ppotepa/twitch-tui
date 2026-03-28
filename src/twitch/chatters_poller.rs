@@ -18,7 +18,7 @@ pub struct ChattersPoller {
 }
 
 impl ChattersPoller {
-    pub fn new(
+    pub const fn new(
         client: Client,
         channel_rx: watch::Receiver<Option<(String, String)>>,
         event_tx: Sender<Event>,
@@ -113,7 +113,7 @@ impl ChattersPoller {
 
             // Wait for poll interval OR an immediate channel change — whichever comes first
             tokio::select! {
-                _ = tokio::time::sleep(self.poll_interval) => {}
+                () = tokio::time::sleep(self.poll_interval) => {}
                 result = self.channel_rx.changed() => {
                     if result.is_err() {
                         // Sender dropped — app is shutting down

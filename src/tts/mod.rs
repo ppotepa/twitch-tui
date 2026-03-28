@@ -3,7 +3,7 @@ pub mod providers;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum TtsProvider {
     #[serde(rename = "festival")]
     Festival,
@@ -12,13 +12,8 @@ pub enum TtsProvider {
     #[serde(rename = "google-cloud")]
     GoogleCloud,
     #[serde(rename = "edge-tts")]
+    #[default]
     EdgeTts,
-}
-
-impl Default for TtsProvider {
-    fn default() -> Self {
-        Self::EdgeTts
-    }
 }
 
 /// TTS provider trait for pluggable speech synthesis

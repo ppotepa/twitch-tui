@@ -10,6 +10,7 @@ use rodio::{Decoder, OutputStream, Sink, Source, source::SineWave};
 
 use crate::config::AudioOutputBackend;
 
+#[allow(dead_code)]
 /// Unified audio routing abstraction for stream audio, TTS, and notifications.
 /// Centralizes playback decisions to support:
 /// - Different backends (rodio vs mpv)
@@ -29,25 +30,23 @@ pub struct AudioConfig {
     pub obs_mode: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioBackend {
+    #[default]
     Mpv,
     Streamlink,
 }
 
-impl Default for AudioBackend {
-    fn default() -> Self {
-        Self::Mpv
-    }
-}
-
 /// Plays audio through the configured backend.
 /// This trait abstracts over rodio Sink and mpv Child process.
+#[allow(dead_code)]
 pub struct AudioPlayer {
     sink: Option<Sink>,
     _stream: Option<OutputStream>,
 }
 
+#[allow(dead_code)]
 impl AudioPlayer {
     /// Create a new audio player (rodio-based)
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -60,58 +59,62 @@ impl AudioPlayer {
     }
 
     /// Append a sine wave beep to the sink
-    pub fn append_beep(&mut self, volume: f32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref sink) = self.sink {
-            sink.append(
-                SineWave::new(800.0)
-                    .take_duration(Duration::from_millis(100))
-                    .amplify(volume),
-            );
-            Ok(())
-        } else {
-            Err("No audio sink available".into())
-        }
+    pub fn append_beep(&self, volume: f32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.sink.as_ref().map_or_else(
+            || Err("No audio sink available".into()),
+            |sink| {
+                sink.append(
+                    SineWave::new(800.0)
+                        .take_duration(Duration::from_millis(100))
+                        .amplify(volume),
+                );
+                Ok(())
+            },
+        )
     }
 
     /// Append a decoded audio source from bytes
     pub fn append_embedded(
-        &mut self,
+        &self,
         sound_data: &[u8],
         volume: f32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref sink) = self.sink {
-            let source = Decoder::new(Cursor::new(sound_data.to_vec()))?;
-            sink.append(source.amplify(volume));
-            Ok(())
-        } else {
-            Err("No audio sink available".into())
-        }
+        self.sink.as_ref().map_or_else(
+            || Err("No audio sink available".into()),
+            |sink| {
+                let source = Decoder::new(Cursor::new(sound_data.to_vec()))?;
+                sink.append(source.amplify(volume));
+                Ok(())
+            },
+        )
     }
 
     /// Append a decoded audio source from file
     pub fn append_file(
-        &mut self,
+        &self,
         path: &Path,
         volume: f32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref sink) = self.sink {
-            let file = File::open(path)?;
-            let source = Decoder::new(BufReader::new(file))?;
-            sink.append(source.amplify(volume));
-            Ok(())
-        } else {
-            Err("No audio sink available".into())
-        }
+        self.sink.as_ref().map_or_else(
+            || Err("No audio sink available".into()),
+            |sink| {
+                let file = File::open(path)?;
+                let source = Decoder::new(BufReader::new(file))?;
+                sink.append(source.amplify(volume));
+                Ok(())
+            },
+        )
     }
 
     /// Sleep until all queued audio has finished playing
     pub fn wait(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref sink) = self.sink {
-            sink.sleep_until_end();
-            Ok(())
-        } else {
-            Err("No audio sink available".into())
-        }
+        self.sink.as_ref().map_or_else(
+            || Err("No audio sink available".into()),
+            |sink| {
+                sink.sleep_until_end();
+                Ok(())
+            },
+        )
     }
 }
 
@@ -124,6 +127,7 @@ impl Default for AudioPlayer {
     }
 }
 
+#[allow(dead_code)]
 /// Plays audio through mpv command.
 /// Used for OBS capture when mpv backend is selected.
 pub fn play_with_mpv(
@@ -131,7 +135,7 @@ pub fn play_with_mpv(
     volume: u8,
     extra_args: &[&str],
 ) -> Result<Child, Box<dyn std::error::Error + Send + Sync>> {
-    let volume_arg = format!("--volume={}", volume);
+    let volume_arg = format!("--volume={volume}");
     let mut cmd = Command::new("mpv");
     cmd.arg("--no-video")
         .arg(&volume_arg)

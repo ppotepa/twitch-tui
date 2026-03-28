@@ -110,8 +110,7 @@ impl TwitchOauth {
     pub fn has_scope(&self, scope: &str) -> bool {
         self.inner_oauth
             .as_ref()
-            .map(|oauth| oauth.scopes.iter().any(|s| s == scope))
-            .unwrap_or(false)
+            .is_some_and(|oauth| oauth.scopes.iter().any(|s| s == scope))
     }
 
     pub fn client(&self) -> Option<Client> {

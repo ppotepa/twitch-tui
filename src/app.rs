@@ -33,7 +33,10 @@ use crate::{
         ApplyCommand, DecodedEmote, DownloadedEmotes, Emotes, SharedEmotes, display_emote,
         query_emotes,
     },
-    events::{Event, Events, InternalEvent, StreamStatusInfo, TwitchAction, TwitchEvent, TwitchNotification},
+    events::{
+        Event, Events, InternalEvent, StreamStatusInfo, TwitchAction, TwitchEvent,
+        TwitchNotification,
+    },
     handlers::{
         data::{DataBuilder, KNOWN_CHATTERS, MessageData},
         filters::Filters,
@@ -158,9 +161,9 @@ impl App {
         }
 
         if let Some(mut process) = self.running_audio.take() {
-            _ = process
-                .kill()
-                .inspect_err(|err| error!("failed to restart audio process on channel switch: {err}"));
+            _ = process.kill().inspect_err(|err| {
+                error!("failed to restart audio process on channel switch: {err}");
+            });
         }
 
         self.toggle_audio();
@@ -195,7 +198,9 @@ impl App {
 
         let emotes_rx = query_emotes(&config, twitch_oauth.clone(), config.twitch.channel.clone());
 
-        let own_login = twitch_oauth.login().unwrap_or_else(|| config.twitch.username.clone());
+        let own_login = twitch_oauth
+            .login()
+            .unwrap_or_else(|| config.twitch.username.clone());
         let notification_handler = NotificationHandler::new(
             config.notifications.clone(),
             config.tts.clone(),
@@ -281,9 +286,9 @@ impl App {
     fn view_stream_in_terminal(&mut self) {
         self.refresh_audio_process();
         if let Some(mut process) = self.running_audio.take() {
-            _ = process
-                .kill()
-                .inspect_err(|err| error!("failed to kill audio process before terminal view: {err}"));
+            _ = process.kill().inspect_err(|err| {
+                error!("failed to kill audio process before terminal view: {err}");
+            });
         }
 
         let channel = self.current_channel();
@@ -291,12 +296,7 @@ impl App {
 
         // Suspend TUI: leave alternate screen and restore terminal
         disable_raw_mode().unwrap_or_default();
-        execute!(
-            stdout(),
-            LeaveAlternateScreen,
-            DisableMouseCapture,
-        )
-        .unwrap_or_default();
+        execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture,).unwrap_or_default();
 
         println!("\n📺 Watching {channel} — press Q to return\n");
 
@@ -336,7 +336,6 @@ impl App {
         .unwrap_or_default();
     }
 
-
     fn toggle_audio(&mut self) {
         self.refresh_audio_process();
 
@@ -350,34 +349,47 @@ impl App {
         let event_tx = self.event_tx.clone();
 
         let url = format!("https://twitch.tv/{channel}");
-        
+        let url_placeholder = concat!("{", "url", "}");
+
         // Determine which backend to use
         let backend = &self.config.frontend.audio_backend;
         let (cmd, args) = match backend {
             AudioBackend::Mpv => {
-                let mut audio_cmd = self.config.frontend.audio_command.clone();
+                let audio_cmd = self.config.frontend.audio_command.clone();
                 if audio_cmd.is_empty() {
                     let _ = event_tx.try_send(
-                        DataBuilder::system("⚠ audio_command is empty — set it in config".to_string()).into(),
+                        DataBuilder::system(
+                            "⚠ audio_command is empty — set it in config".to_string(),
+                        )
+                        .into(),
                     );
                     return;
                 }
 
                 // Support {url} placeholder anywhere in args, otherwise append URL at end
-                let has_placeholder = audio_cmd.iter().any(|a| a.contains("{url}"));
+                let has_placeholder = audio_cmd.iter().any(|a| a.contains(url_placeholder));
                 let args: Vec<String> = if has_placeholder {
-                    audio_cmd.iter().map(|a| a.replace("{url}", &url)).collect()
+                    audio_cmd
+                        .iter()
+                        .map(|a| a.replace(url_placeholder, &url))
+                        .collect()
                 } else {
-                    let mut a = audio_cmd.clone();
+                    let mut a = audio_cmd;
                     a.push(url.clone());
                     a
                 };
 
-                if !args.iter().any(|arg| arg.starts_with("--volume=") || arg == "--volume") {
-                    let mut args = args;
-                    args.insert(1, format!("--volume={}", self.config.frontend.audio_volume.min(100)));
+                if args
+                    .iter()
+                    .any(|arg| arg.starts_with("--volume=") || arg == "--volume")
+                {
                     (args[0].clone(), args[1..].to_vec())
                 } else {
+                    let mut args = args;
+                    args.insert(
+                        1,
+                        format!("--volume={}", self.config.frontend.audio_volume.min(100)),
+                    );
                     (args[0].clone(), args[1..].to_vec())
                 }
             }
@@ -387,7 +399,7 @@ impl App {
                 let cmd = "streamlink".to_string();
                 let args = vec![
                     url.clone(),
-                    "audio,worst".to_string(),  // Try audio-only format first, fallback to worst quality
+                    "audio,worst".to_string(), // Try audio-only format first, fallback to worst quality
                     "-o".to_string(),
                     format!("mpv --no-video --volume={volume} -"), // Pipe to mpv
                 ];
@@ -432,13 +444,15 @@ impl App {
                             AudioBackend::Streamlink => "streamlink",
                         };
                         let _ = event_tx.try_send(
-                            DataBuilder::system(format!("♪ Audio started ({backend_name}): {url}")).into(),
+                            DataBuilder::system(format!("♪ Audio started ({backend_name}): {url}"))
+                                .into(),
                         );
                     }
                     Err(err) => {
                         error!("error checking audio process: {err}");
                         let _ = event_tx.try_send(
-                            DataBuilder::system(format!("⚠ Audio failed while starting: {err}")).into(),
+                            DataBuilder::system(format!("⚠ Audio failed while starting: {err}"))
+                                .into(),
                         );
                     }
                 }
@@ -472,7 +486,8 @@ impl App {
 
     fn tab_prev(&mut self) {
         if self.channel_tabs.len() > 1 {
-            self.active_tab = self.active_tab
+            self.active_tab = self
+                .active_tab
                 .checked_sub(1)
                 .unwrap_or(self.channel_tabs.len() - 1);
             let channel = self.channel_tabs[self.active_tab].clone();
@@ -627,44 +642,57 @@ impl App {
                 tokio::spawn(async move {
                     let Some(client) = client else {
                         let _ = event_tx
-                            .send(DataBuilder::system("⚠ No Twitch client for clip creation".into()).into())
+                            .send(
+                                DataBuilder::system("⚠ No Twitch client for clip creation".into())
+                                    .into(),
+                            )
                             .await;
                         return;
                     };
                     match get_channel_id(&client, &channel).await {
-                        Ok(broadcaster_id) => {
-                            match create_clip(&client, &broadcaster_id).await {
-                                Ok(clip) => {
-                                    let url = clip.edit_url.replace("/edit", "");
-                                    let _ = event_tx
-                                        .send(DataBuilder::system(format!("📎 Clip created: {url}")).into())
-                                        .await;
-                                }
-                                Err(e) => {
-                                    let _ = event_tx
-                                        .send(DataBuilder::system(format!("⚠ Clip failed: {e}")).into())
-                                        .await;
-                                }
+                        Ok(broadcaster_id) => match create_clip(&client, &broadcaster_id).await {
+                            Ok(clip) => {
+                                let url = clip.edit_url.replace("/edit", "");
+                                let _ = event_tx
+                                    .send(
+                                        DataBuilder::system(format!("📎 Clip created: {url}"))
+                                            .into(),
+                                    )
+                                    .await;
                             }
-                        }
+                            Err(e) => {
+                                let _ = event_tx
+                                    .send(DataBuilder::system(format!("⚠ Clip failed: {e}")).into())
+                                    .await;
+                            }
+                        },
                         Err(e) => {
                             let _ = event_tx
-                                .send(DataBuilder::system(format!("⚠ Could not get channel ID: {e}")).into())
+                                .send(
+                                    DataBuilder::system(format!("⚠ Could not get channel ID: {e}"))
+                                        .into(),
+                                )
                                 .await;
                         }
                     }
                 });
             }
             InternalEvent::StreamInfoUpdate(info) => {
-                self.stream_info = info.clone();
+                self.stream_info.clone_from(info);
             }
             InternalEvent::ToggleAudio => {
                 self.toggle_audio();
             }
             InternalEvent::ToggleTts => {
                 let muted = self.notification_handler.toggle_tts();
-                let msg = if muted { "🔇 TTS muted" } else { "🔊 TTS enabled" };
-                let _ = self.event_tx.try_send(DataBuilder::system(msg.to_string()).into());
+                let msg = if muted {
+                    "🔇 TTS muted"
+                } else {
+                    "🔊 TTS enabled"
+                };
+                let _ = self
+                    .event_tx
+                    .try_send(DataBuilder::system(msg.to_string()).into());
             }
             InternalEvent::ToggleStreamViewer => {
                 self.view_stream_in_terminal();
@@ -672,9 +700,9 @@ impl App {
             InternalEvent::TabNew => {
                 // Open channel switcher — user types channel name, then JoinChannel fires
                 // We store the new tab when the channel is joined
-                let _ = self.event_tx.try_send(Event::Internal(
-                    InternalEvent::SwitchState(State::Normal),
-                ));
+                let _ = self
+                    .event_tx
+                    .try_send(Event::Internal(InternalEvent::SwitchState(State::Normal)));
                 // Signal chat to open channel_input by sending a fake ChannelSwitcher key
                 // The simplest way: just open the channel_switcher via a flag
                 // For now, toggle channel_input focus via an event (reuse OpenStream path)
@@ -708,11 +736,15 @@ impl App {
                 }
 
                 // Register channel as a tab if it's new
-                if !self.channel_tabs.contains(&channel) {
+                if self.channel_tabs.contains(&channel) {
+                    self.active_tab = self
+                        .channel_tabs
+                        .iter()
+                        .position(|c| c == &channel)
+                        .unwrap_or(0);
+                } else {
                     self.channel_tabs.push(channel.clone());
                     self.active_tab = self.channel_tabs.len() - 1;
-                } else {
-                    self.active_tab = self.channel_tabs.iter().position(|c| c == &channel).unwrap_or(0);
                 }
 
                 self.follow_audio_to_current_channel();
@@ -746,14 +778,16 @@ impl App {
                         .borrow_mut()
                         .add("chatters", message_data.author.clone());
                 }
-                
+
                 // Trigger notifications and TTS for non-system messages
                 if !m.system {
                     self.notification_handler.play_sound(&m.author, &m.payload);
                     self.notification_handler.speak(&m.author, &m.payload);
 
                     // Highlight reel: save @mention to log file
-                    let own = self.twitch_oauth.login()
+                    let own = self
+                        .twitch_oauth
+                        .login()
                         .unwrap_or_else(|| self.config.twitch.username.clone());
                     if self.config.notifications.highlight_log_enabled
                         && m.payload.to_lowercase().contains(&own.to_lowercase())
@@ -761,7 +795,7 @@ impl App {
                         self.append_highlight(&m.author, &m.payload);
                     }
                 }
-                
+
                 self.messages.borrow_mut().push_front(message_data);
 
                 // If scrolling is enabled, pad for more messages.
@@ -780,13 +814,14 @@ impl App {
                 self.remove_message_with(message_id.as_str());
             }
             TwitchNotification::UserJoin(username) => {
+                const USER_PLACEHOLDER: &str = "{user}";
                 self.notification_handler
                     .play_sound_for_event(EventType::UserJoin, username, "");
                 let msg = self
                     .config
                     .notifications
                     .join_message
-                    .replace("{user}", username);
+                    .replace(USER_PLACEHOLDER, username);
                 if let TwitchNotification::Message(raw) = DataBuilder::twitch(msg) {
                     self.messages
                         .borrow_mut()
@@ -794,13 +829,14 @@ impl App {
                 }
             }
             TwitchNotification::UserLeave(username) => {
+                const USER_PLACEHOLDER: &str = "{user}";
                 self.notification_handler
                     .play_sound_for_event(EventType::UserLeave, username, "");
                 let msg = self
                     .config
                     .notifications
                     .leave_message
-                    .replace("{user}", username);
+                    .replace(USER_PLACEHOLDER, username);
                 if let TwitchNotification::Message(raw) = DataBuilder::twitch(msg) {
                     self.messages
                         .borrow_mut()
@@ -825,7 +861,11 @@ impl App {
         if let Some(parent) = std::path::Path::new(path).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
             let channel = &self.config.twitch.channel;
             let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
             let _ = writeln!(file, "[{ts}] [{channel}] <{author}> {message}");
@@ -833,8 +873,8 @@ impl App {
     }
 
     fn draw_channel_tabs(&self, f: &mut Frame, area: Rect) {
-        use tui::widgets::Tabs;
         use tui::text::Line;
+        use tui::widgets::Tabs;
         let tab_titles: Vec<Line> = self
             .channel_tabs
             .iter()
@@ -857,7 +897,10 @@ impl App {
     fn draw_status_bar(&self, f: &mut Frame, area: Rect) {
         let channel = self.current_channel();
         let bar_style = Style::default().bg(Color::DarkGray).fg(Color::White);
-        let accent = Style::default().bg(Color::DarkGray).fg(Color::Cyan).add_modifier(Modifier::BOLD);
+        let accent = Style::default()
+            .bg(Color::DarkGray)
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
         let audio_indicator = if self.running_audio.is_some() {
             format!(" ♪{} ", self.audio_meter())
         } else {
@@ -869,30 +912,42 @@ impl App {
             ""
         };
 
-        let spans = if let Some(ref info) = self.stream_info {
-            let h = info.uptime_secs / 3600;
-            let m = (info.uptime_secs % 3600) / 60;
-            let uptime = if h > 0 { format!("{h}h{m:02}m") } else { format!("{m}m") };
-            let viewers = info.viewer_count;
-            let game = info.game_name.chars().take(20).collect::<String>();
-            let title = info.title.chars().take(40).collect::<String>();
-            vec![
-                Span::styled(format!(" 📺 {channel}{audio_indicator}{tts_indicator} "), accent),
-                Span::styled("│ 🔴 LIVE  ".to_string(), bar_style),
-                Span::styled(format!("👥 {viewers}  "), bar_style),
-                Span::styled(format!("⏱ {uptime}  "), bar_style),
-                Span::styled(format!("🎮 {game}  "), bar_style),
-                Span::styled(format!("{title}"), bar_style),
-            ]
-        } else {
-            vec![
-                Span::styled(format!(" 📺 {channel}{audio_indicator}{tts_indicator} "), accent),
-                Span::styled("│ ⚫ offline".to_string(), bar_style),
-            ]
-        };
+        let spans = self.stream_info.as_ref().map_or_else(
+            || {
+                vec![
+                    Span::styled(
+                        format!(" 📺 {channel}{audio_indicator}{tts_indicator} "),
+                        accent,
+                    ),
+                    Span::styled("│ ⚫ offline".to_string(), bar_style),
+                ]
+            },
+            |info| {
+                let h = info.uptime_secs / 3600;
+                let m = (info.uptime_secs % 3600) / 60;
+                let uptime = if h > 0 {
+                    format!("{h}h{m:02}m")
+                } else {
+                    format!("{m}m")
+                };
+                let viewers = info.viewer_count;
+                let game = info.game_name.chars().take(20).collect::<String>();
+                let title = info.title.chars().take(40).collect::<String>();
+                vec![
+                    Span::styled(
+                        format!(" 📺 {channel}{audio_indicator}{tts_indicator} "),
+                        accent,
+                    ),
+                    Span::styled("│ 🔴 LIVE  ".to_string(), bar_style),
+                    Span::styled(format!("👥 {viewers}  "), bar_style),
+                    Span::styled(format!("⏱ {uptime}  "), bar_style),
+                    Span::styled(format!("🎮 {game}  "), bar_style),
+                    Span::styled(title, bar_style),
+                ]
+            },
+        );
 
-        let paragraph = Paragraph::new(Line::from(spans))
-            .block(Block::default().style(bar_style));
+        let paragraph = Paragraph::new(Line::from(spans)).block(Block::default().style(bar_style));
         f.render_widget(paragraph, area);
     }
 

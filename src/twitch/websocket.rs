@@ -62,7 +62,7 @@ pub struct TwitchWebsocketThread {
 }
 
 impl TwitchWebsocketThread {
-    fn new(
+    const fn new(
         config: SharedCoreConfig,
         context: TwitchWebsocketContext,
         event_tx: Sender<Event>,
@@ -97,9 +97,7 @@ impl TwitchWebsocketThread {
             }
         }
 
-        if let (Some(channel_id), Some(oauth)) =
-            (self.context.channel_id(), self.context.oauth())
-        {
+        if let (Some(channel_id), Some(oauth)) = (self.context.channel_id(), self.context.oauth()) {
             if let Some(user_id) = oauth.user_id() {
                 let _ = self
                     .channel_watch_tx
@@ -248,4 +246,3 @@ impl TwitchWebsocketThread {
         .await
     }
 }
-

@@ -123,7 +123,7 @@ impl ReceivedTwitchEventReply {
     }
 }
 
-/// Raid info embedded in a channel.chat.notification event with notice_type = "raid"
+/// Raid info embedded in a channel.chat.notification event with `notice_type` = "raid"
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ReceivedTwitchEventRaid {
     pub user_name: String,

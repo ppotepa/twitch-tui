@@ -109,10 +109,7 @@ fn render_frame(f: &mut Frame, checks: &[Check], done: bool, version: &str) {
                 if detail.is_empty() {
                     Span::raw("")
                 } else {
-                    Span::styled(
-                        format!("  {detail}"),
-                        Style::default().fg(Color::DarkGray),
-                    )
+                    Span::styled(format!("  {detail}"), Style::default().fg(Color::DarkGray))
                 },
             ]),
             Status::Warn(detail) => Line::from(vec![
@@ -125,10 +122,7 @@ fn render_frame(f: &mut Frame, checks: &[Check], done: bool, version: &str) {
                 ),
                 Span::styled("] ", Style::default().fg(Color::Yellow)),
                 Span::styled(check.label.clone(), Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("  {detail}"),
-                    Style::default().fg(Color::Yellow),
-                ),
+                Span::styled(format!("  {detail}"), Style::default().fg(Color::Yellow)),
             ]),
             Status::Fail(detail) => Line::from(vec![
                 Span::styled("  [", Style::default().fg(Color::Red)),
@@ -138,10 +132,7 @@ fn render_frame(f: &mut Frame, checks: &[Check], done: bool, version: &str) {
                 ),
                 Span::styled("] ", Style::default().fg(Color::Red)),
                 Span::styled(check.label.clone(), Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("  {detail}"),
-                    Style::default().fg(Color::Red),
-                ),
+                Span::styled(format!("  {detail}"), Style::default().fg(Color::Red)),
             ]),
         };
         lines.push(line);
@@ -260,11 +251,9 @@ pub async fn run_boot_screen(
     checks[2].status = Status::Running;
     let _ = terminal.draw(|f| render_frame(f, &checks, false, version));
     tokio::time::sleep(Duration::from_millis(40)).await;
-    checks[2].status = if let Some(login) = twitch_oauth.login() {
-        Status::Ok(login)
-    } else {
-        Status::Fail("OAuth not validated".into())
-    };
+    checks[2].status = twitch_oauth
+        .login()
+        .map_or_else(|| Status::Fail("OAuth not validated".into()), Status::Ok);
     let _ = terminal.draw(|f| render_frame(f, &checks, false, version));
 
     // ── Check 3: moderator:read:chatters scope ──────────────────────────────
@@ -295,29 +284,29 @@ pub async fn run_boot_screen(
     checks[5].status = Status::Running;
     let _ = terminal.draw(|f| render_frame(f, &checks, false, version));
     tokio::time::sleep(Duration::from_millis(40)).await;
-    
+
     let stream_backend = &config.frontend.audio_backend;
     let backend_name = match stream_backend {
         crate::config::AudioBackend::Mpv => "mpv",
         crate::config::AudioBackend::Streamlink => "streamlink",
     };
-    
+
     let routing_info = if config.frontend.audio_obs_mode {
-        format!("{} (OBS mode: unified)", backend_name)
+        format!("{backend_name} (OBS mode: unified)")
     } else {
-        format!("{} (normal mode)", backend_name)
+        format!("{backend_name} (normal mode)")
     };
-    
+
     let backend_ok = if backend_name == "streamlink" {
         cmd_exists("streamlink").await
     } else {
         cmd_exists("mpv").await
     };
-    
+
     checks[5].status = if backend_ok {
         Status::Ok(routing_info)
     } else {
-        Status::Warn(format!("{}: not found", backend_name))
+        Status::Warn(format!("{backend_name}: not found"))
     };
     let _ = terminal.draw(|f| render_frame(f, &checks, false, version));
 

@@ -19,8 +19,10 @@ pub struct FestivalProvider;
 impl TtsBackend for FestivalProvider {
     async fn speak(&self, text: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut cmd = Command::new("bash");
-        cmd.arg("-c")
-            .arg(format!("echo '{}' | festival --tts", shell_escape_single_quotes(text)));
+        cmd.arg("-c").arg(format!(
+            "echo '{}' | festival --tts",
+            shell_escape_single_quotes(text)
+        ));
 
         let output = cmd.output().await?;
 
@@ -46,7 +48,8 @@ impl TtsBackend for EspeakNgProvider {
         let mut cmd = Command::new("espeak-ng");
         cmd.arg("-v")
             .arg(&self.voice)
-            .arg("-s").arg(self.speed.to_string())
+            .arg("-s")
+            .arg(self.speed.to_string())
             .arg(text);
 
         let output = cmd.output().await?;
@@ -61,7 +64,7 @@ impl TtsBackend for EspeakNgProvider {
     }
 }
 
-/// Google Cloud Text-to-Speech provider (REST API, requires GOOGLE_API_KEY env var)
+/// Google Cloud Text-to-Speech provider (REST API, requires `GOOGLE_API_KEY` env var)
 pub struct GoogleCloudProvider {
     pub voice_name: String,
     pub language_code: String,
@@ -70,14 +73,10 @@ pub struct GoogleCloudProvider {
 #[async_trait]
 impl TtsBackend for GoogleCloudProvider {
     async fn speak(&self, text: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let api_key = std::env::var("GOOGLE_API_KEY").map_err(|_| {
-            std::io::Error::other("GOOGLE_API_KEY env var not set")
-        })?;
+        let api_key = std::env::var("GOOGLE_API_KEY")
+            .map_err(|_| std::io::Error::other("GOOGLE_API_KEY env var not set"))?;
 
-        let url = format!(
-            "https://texttospeech.googleapis.com/v1/text:synthesize?key={}",
-            api_key
-        );
+        let url = format!("https://texttospeech.googleapis.com/v1/text:synthesize?key={api_key}");
 
         let body = json!({
             "input": { "text": text },
@@ -94,9 +93,10 @@ impl TtsBackend for GoogleCloudProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(std::io::Error::other(
-                format!("Google Cloud TTS API error {status}: {body}")
-            ).into());
+            return Err(std::io::Error::other(format!(
+                "Google Cloud TTS API error {status}: {body}"
+            ))
+            .into());
         }
 
         let json: serde_json::Value = response.json().await?;
@@ -116,7 +116,9 @@ impl TtsBackend for GoogleCloudProvider {
 
         tokio::task::spawn_blocking(move || play_file_blocking(&tmp_path, 1.0))
             .await
-            .map_err(|err| std::io::Error::other(format!("Google Cloud playback task failed: {err}")))??;
+            .map_err(|err| {
+                std::io::Error::other(format!("Google Cloud playback task failed: {err}"))
+            })??;
 
         Ok(())
     }
@@ -157,7 +159,9 @@ impl TtsBackend for EdgeTtsProvider {
 
         tokio::task::spawn_blocking(move || play_file_blocking(&tmp_path, 1.0))
             .await
-            .map_err(|err| std::io::Error::other(format!("edge-tts playback task failed: {err}")))??;
+            .map_err(|err| {
+                std::io::Error::other(format!("edge-tts playback task failed: {err}"))
+            })??;
 
         Ok(())
     }

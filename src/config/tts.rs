@@ -118,7 +118,7 @@ impl Default for TtsConfig {
 
 impl TtsConfig {
     #[allow(dead_code)]
-    pub fn is_configured(&self) -> bool {
+    pub const fn is_configured(&self) -> bool {
         self.enabled
     }
 

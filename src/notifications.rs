@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{io::Write, path::Path};
 
 use reqwest::Client;
 use tokio::sync::mpsc;
@@ -17,7 +17,7 @@ static DEFAULT_JOIN_SOUND: &[u8] = include_bytes!("../assets/enter.wav");
 static DEFAULT_LEAVE_SOUND: &[u8] = include_bytes!("../assets/leave.wav");
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum EventType {
     Message,
     UserJoin,
@@ -64,7 +64,7 @@ impl NotificationHandler {
     }
 
     /// Toggle TTS on/off at runtime. Returns the new state (true = muted).
-    pub fn toggle_tts(&mut self) -> bool {
+    pub const fn toggle_tts(&mut self) -> bool {
         self.tts_muted = !self.tts_muted;
         self.tts_muted
     }
@@ -118,7 +118,6 @@ impl NotificationHandler {
         match event_sounds.sound_type {
             SoundType::Bell => {
                 print!("\x07");
-                use std::io::Write;
                 let _ = std::io::stdout().flush();
             }
             SoundType::Beep => {
@@ -166,7 +165,12 @@ impl NotificationHandler {
         }
 
         // Skip bot users
-        if self.tts_config.skip_users.iter().any(|u| u.eq_ignore_ascii_case(author)) {
+        if self
+            .tts_config
+            .skip_users
+            .iter()
+            .any(|u| u.eq_ignore_ascii_case(author))
+        {
             return;
         }
 
@@ -283,8 +287,5 @@ async fn speak_text(
         }
     }
 
-    Err(last_error
-        .unwrap_or_else(|| std::io::Error::other("No TTS providers configured").into()))
+    Err(last_error.unwrap_or_else(|| std::io::Error::other("No TTS providers configured").into()))
 }
-
-

@@ -53,13 +53,12 @@ pub async fn get_stream_info(client: &Client, user_login: &str) -> Option<Stream
 
     let uptime_secs = DateTime::parse_from_rfc3339(&detail.started_at)
         .ok()
-        .map(|start| {
+        .map_or(0, |start| {
             Utc::now()
                 .signed_duration_since(start.with_timezone(&Utc))
                 .num_seconds()
                 .max(0) as u64
-        })
-        .unwrap_or(0);
+        });
 
     Some(StreamStatusInfo {
         viewer_count: detail.viewer_count,

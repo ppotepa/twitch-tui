@@ -1,38 +1,28 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioOutputBackend {
     /// Use rodio for local playback (default)
+    #[default]
     Rodio,
     /// Use mpv for playback (better for OBS capture)
     Mpv,
 }
 
-impl Default for AudioOutputBackend {
-    fn default() -> Self {
-        Self::Rodio
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TriggerMode {
     /// Trigger on all messages
     All,
     /// Only trigger when username is mentioned
+    #[default]
     Mentions,
     /// Only trigger for specific usernames
     Specific,
 }
 
-impl Default for TriggerMode {
-    fn default() -> Self {
-        Self::Mentions
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SoundType {
     /// Use terminal bell character
@@ -40,15 +30,10 @@ pub enum SoundType {
     /// Play generated beep sound (rodio)
     Beep,
     /// Play default embedded sound file
+    #[default]
     Default,
     /// Play custom sound file
     File,
-}
-
-impl Default for SoundType {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -58,7 +43,7 @@ pub struct EventSounds {
     pub enabled: bool,
     /// Type of sound to play
     pub sound_type: SoundType,
-    /// Path to custom sound file (only used if sound_type is "file")
+    /// Path to custom sound file (only used if `sound_type` is "file")
     pub sound_file: Option<String>,
     /// Volume level (0.0 to 1.0)
     pub volume: f32,
@@ -146,15 +131,16 @@ impl Default for NotificationsConfig {
             join_message: "👋 @{user} joined".to_string(),
             leave_message: "👋 @{user} left".to_string(),
             highlight_log_enabled: false,
-            highlight_log_path: directories::BaseDirs::new()
-                .map(|b| {
+            highlight_log_path: directories::BaseDirs::new().map_or_else(
+                || "~/.local/share/twt/highlights.log".to_string(),
+                |b| {
                     b.data_local_dir()
                         .join("twt")
                         .join("highlights.log")
                         .to_string_lossy()
                         .into_owned()
-                })
-                .unwrap_or_else(|| "~/.local/share/twt/highlights.log".to_string()),
+                },
+            ),
             chatters_own_channel_only: true,
             chatters_channel: String::new(),
             output_backend: AudioOutputBackend::default(),

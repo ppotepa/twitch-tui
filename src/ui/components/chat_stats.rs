@@ -8,13 +8,16 @@ use tui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::{app::SharedMessages, ui::components::{Component, utils::popup_area}};
+use crate::{
+    app::SharedMessages,
+    ui::components::{Component, utils::popup_area},
+};
 
 static STOP_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-    "is", "it", "i", "you", "me", "my", "your", "we", "he", "she", "they", "this",
-    "that", "was", "are", "be", "been", "have", "has", "had", "do", "did", "will",
-    "not", "no", "so", "if", "as", "up", "by", "from", "just", "like", "what",
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "is", "it",
+    "i", "you", "me", "my", "your", "we", "he", "she", "they", "this", "that", "was", "are", "be",
+    "been", "have", "has", "had", "do", "did", "will", "not", "no", "so", "if", "as", "up", "by",
+    "from", "just", "like", "what",
 ];
 
 pub struct ChatStatsWidget {
@@ -23,11 +26,14 @@ pub struct ChatStatsWidget {
 }
 
 impl ChatStatsWidget {
-    pub fn new(messages: SharedMessages) -> Self {
-        Self { visible: false, messages }
+    pub const fn new(messages: SharedMessages) -> Self {
+        Self {
+            visible: false,
+            messages,
+        }
     }
 
-    pub fn toggle(&mut self) {
+    pub const fn toggle(&mut self) {
         self.visible = !self.visible;
     }
 
@@ -59,7 +65,9 @@ impl ChatStatsWidget {
         let mut top_words: Vec<(String, usize)> = word_counts.into_iter().collect();
         top_words.sort_by(|a, b| b.1.cmp(&a.1));
 
-        let header_style = Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan);
+        let header_style = Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Cyan);
         let val_style = Style::default().fg(Color::White);
         let dim_style = Style::default().fg(Color::DarkGray);
 
@@ -103,7 +111,9 @@ impl ChatStatsWidget {
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
             "Press m to close",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
         )));
 
         lines
@@ -118,13 +128,12 @@ impl Component for ChatStatsWidget {
 
         let area = popup_area(area.unwrap_or_else(|| f.area()), 50, 70);
         let lines = self.compute();
-        let paragraph = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" 📊 Chat Stats ")
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
+        let paragraph = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" 📊 Chat Stats ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        );
         f.render_widget(Clear, area);
         f.render_widget(paragraph, area);
     }
