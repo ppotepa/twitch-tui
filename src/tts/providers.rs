@@ -70,12 +70,13 @@ async fn apply_pan_with_ffmpeg(
     }
 
     let pan_clamped = pan.clamp(-1.0, 1.0);
-    // left level:  1.0 when pan≤0, attentuates to 0.0 at pan=+1
-    // right level: 1.0 when pan≥0, attentuates to 0.0 at pan=-1
+    // left level:  1.0 when pan≤0, attenuates to 0.0 at pan=+1
+    // right level: 1.0 when pan≥0, attenuates to 0.0 at pan=-1
+    // Both output channels source from c0 because TTS audio is mono.
     let left_level = 1.0_f32 - pan_clamped.max(0.0);
     let right_level = 1.0_f32 + pan_clamped.min(0.0);
 
-    let pan_filter = format!("pan=stereo|c0={left_level}*c0|c1={right_level}*c1");
+    let pan_filter = format!("pan=stereo|c0={left_level}*c0|c1={right_level}*c0");
 
     let tmp_out = NamedTempFile::with_suffix(".wav")?;
     let tmp_out_path = tmp_out.path().to_path_buf();
