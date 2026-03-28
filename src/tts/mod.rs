@@ -21,17 +21,17 @@ pub enum TtsProvider {
 pub trait TtsBackend: Send + Sync {
     async fn speak(&self, text: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Speak with optional stereo pan and optional per-speaker voice selection.
+    /// Speak with spatial positioning and optional per-speaker voice selection.
     ///
-    /// - `pan`: -1.0 (full left) to 1.0 (full right), `None` = centre
-    /// - `speaker_hash`: deterministic hash of the username; providers map this
-    ///   to a voice in their own format so every chatter has a unique voice.
+    /// - `spatial_angle`: position on a circle around the listener in degrees:
+    ///   0° = front, 90° = right, 180° = back, 270° = left. `None` = no spatial effect.
+    /// - `speaker_hash`: deterministic hash of the username for consistent voice assignment.
     ///
     /// Default implementation ignores both parameters and calls `speak()`.
     async fn speak_with_pan(
         &self,
         text: &str,
-        _pan: Option<f32>,
+        _spatial_angle: Option<f32>,
         _speaker_hash: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.speak(text).await

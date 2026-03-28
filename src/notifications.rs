@@ -315,15 +315,18 @@ fn play_sound_file_blocking(
     }
 }
 
-/// Compute deterministic pan and speaker hash from a username.
-/// Returns `(pan: f32, hash: u64)` where pan is in `[-1.0, 1.0]`.
+/// Compute a deterministic spatial position for a username.
+/// Returns `(angle_deg, hash)` where:
+///   - `angle_deg` ∈ [0, 360): position on a circle around the listener
+///     (0°=front, 90°=right, 180°=back, 270°=left)
+///   - `hash`: the raw u64 hash, reused for voice selection
 fn username_to_spatial(username: &str) -> (f32, u64) {
     let mut hasher = DefaultHasher::new();
     username.to_lowercase().hash(&mut hasher);
     let hash = hasher.finish();
     let normalized = hash as f32 / u64::MAX as f32;
-    let pan = (normalized * 2.0) - 1.0;
-    (pan, hash)
+    let angle_deg = normalized * 360.0;
+    (angle_deg, hash)
 }
 
 async fn speak_text(
@@ -338,16 +341,16 @@ async fn speak_text(
     };
     let mut last_error: Option<Box<dyn std::error::Error + Send + Sync>> = None;
 
-    let (pan, speaker_hash) = if config.spatial {
-        let (p, h) = username_to_spatial(author);
-        (Some(p), Some(h))
+    let (spatial_angle, speaker_hash) = if config.spatial {
+        let (angle, hash) = username_to_spatial(author);
+        (Some(angle), Some(hash))
     } else {
         (None, None)
     };
 
     for provider in config.ordered_providers() {
         match create_tts_provider(&provider, config)
-            .speak_with_pan(&formatted_text, pan, speaker_hash)
+            .speak_with_pan(&formatted_text, spatial_angle, speaker_hash)
             .await
         {
             Ok(()) => return Ok(()),

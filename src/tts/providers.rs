@@ -57,26 +57,48 @@ const ESPEAK_SPATIAL_VOICES: &[&str] = &[
     "en-gb+m1", "en-gb+m2", "en-gb+m3", "en-gb+f1", "en-gb+f2",
 ];
 
-/// Apply stereo panning to an audio file using ffmpeg.
-/// Pan range: -1.0 (full left) to 1.0 (full right), 0.0 (centre) = no panning.
-/// Input can be any format ffmpeg understands (mp3, wav, etc.).
-/// Output is always WAV (compatible with both rodio and mpv).
-async fn apply_pan_with_ffmpeg(
-    input_path: &Path,
-    pan: f32,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    if pan.abs() < 0.01 {
-        return Ok(tokio::fs::read(input_path).await?);
+/// Build an ffmpeg audio filter string that simulates a sound source at `angle_deg`
+/// degrees around the listener on a horizontal circle (0° = front, 90° = right,
+/// 180° = back, 270° = left).
+///
+/// Two perceptual cues are encoded:
+///   1. **Azimuth (L/R)** via independent channel attenuation:  pan = sin(angle)
+///   2. **Front/back** via pinna simulation: rear sources lose high frequencies
+///      (lowpass) and are slightly quieter — matching how the ear's pinna
+///      attenuates sounds from behind.
+///
+/// Input audio is assumed to be **mono** (TTS output), so both stereo output
+/// channels are derived from input channel c0.
+fn build_spatial_filter(angle_deg: f32) -> String {
+    let angle_rad = angle_deg.to_radians();
+    let pan = angle_rad.sin(); // -1 (left) .. 0 (front/back) .. +1 (right)
+    let cos_val = angle_rad.cos(); // +1 = front, -1 = back
+
+    let left = 1.0_f32 - pan.max(0.0);
+    let right = 1.0_f32 + pan.min(0.0);
+    let pan_filter = format!("pan=stereo|c0={left:.4}*c0|c1={right:.4}*c0");
+
+    // back_depth: 0.0 at front (cos=+1), 1.0 directly behind (cos=-1)
+    let back_depth = (-cos_val).max(0.0);
+    if back_depth < 0.05 {
+        pan_filter
+    } else {
+        // Simulate pinna occlusion: cut highs, reduce volume
+        let cutoff = (8000.0 - back_depth * 4000.0) as u32; // 8kHz → 4kHz
+        let volume = 1.0 - back_depth * 0.25; // 100% → 75%
+        format!("lowpass=f={cutoff},volume={volume:.4},{pan_filter}")
     }
+}
 
-    let pan_clamped = pan.clamp(-1.0, 1.0);
-    // left level:  1.0 when pan≤0, attenuates to 0.0 at pan=+1
-    // right level: 1.0 when pan≥0, attenuates to 0.0 at pan=-1
-    // Both output channels source from c0 because TTS audio is mono.
-    let left_level = 1.0_f32 - pan_clamped.max(0.0);
-    let right_level = 1.0_f32 + pan_clamped.min(0.0);
-
-    let pan_filter = format!("pan=stereo|c0={left_level}*c0|c1={right_level}*c0");
+/// Apply full spatial audio to a file using ffmpeg.
+/// `angle_deg` is the source position on a circle around the listener:
+///   0° = front, 90° = right, 180° = back, 270° = left.
+/// Input can be any format ffmpeg understands. Output is always WAV.
+async fn apply_spatial_with_ffmpeg(
+    input_path: &Path,
+    angle_deg: f32,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let filter = build_spatial_filter(angle_deg);
 
     let tmp_out = NamedTempFile::with_suffix(".wav")?;
     let tmp_out_path = tmp_out.path().to_path_buf();
@@ -86,14 +108,14 @@ async fn apply_pan_with_ffmpeg(
         .arg("-i")
         .arg(input_path)
         .arg("-af")
-        .arg(&pan_filter)
+        .arg(&filter)
         .arg(&tmp_out_path)
         .output()
         .await?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        warn!("ffmpeg panning failed: {}", stderr);
+        warn!("ffmpeg spatial filter failed: {}", stderr);
         return Ok(tokio::fs::read(input_path).await?);
     }
 
@@ -203,15 +225,13 @@ impl TtsBackend for EspeakNgProvider {
     async fn speak_with_pan(
         &self,
         text: &str,
-        pan: Option<f32>,
+        spatial_angle: Option<f32>,
         speaker_hash: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // If no pan or pan is centre-ish, use normal speak
-        if pan.is_none_or(|p| p.abs() < 0.01) {
+        if spatial_angle.is_none() {
             return self.speak(text).await;
         }
-
-        let pan_value = pan.unwrap_or(0.0);
+        let angle = spatial_angle.unwrap_or(0.0);
 
         // Pick a voice variant deterministically from the speaker hash
         let voice = speaker_hash.map_or(self.voice.as_str(), |hash| {
@@ -241,23 +261,23 @@ impl TtsBackend for EspeakNgProvider {
         f.flush().await?;
         drop(f);
 
-        // Apply panning via ffmpeg (outputs WAV — works with both rodio and mpv)
-        let panned_audio = apply_pan_with_ffmpeg(&tmp_path, pan_value).await?;
+        // Apply spatial filter (pan + front/back EQ) via ffmpeg
+        let spatial_audio = apply_spatial_with_ffmpeg(&tmp_path, angle).await?;
 
-        let tmp_panned = NamedTempFile::with_suffix(".wav")?;
-        let tmp_panned_path = tmp_panned.path().to_path_buf();
-        let mut f_panned = File::create(&tmp_panned_path).await?;
-        f_panned.write_all(&panned_audio).await?;
-        f_panned.flush().await?;
-        drop(f_panned);
+        let tmp_spatial = NamedTempFile::with_suffix(".wav")?;
+        let tmp_spatial_path = tmp_spatial.path().to_path_buf();
+        let mut f_out = File::create(&tmp_spatial_path).await?;
+        f_out.write_all(&spatial_audio).await?;
+        f_out.flush().await?;
+        drop(f_out);
 
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_panned_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, 1.0),
             AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
-                &tmp_panned_path,
+                &tmp_spatial_path,
                 1.0,
                 &output_device,
                 &output_client_name,
@@ -395,14 +415,13 @@ impl TtsBackend for EdgeTtsProvider {
     async fn speak_with_pan(
         &self,
         text: &str,
-        pan: Option<f32>,
+        spatial_angle: Option<f32>,
         speaker_hash: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if pan.is_none_or(|p| p.abs() < 0.01) {
+        if spatial_angle.is_none() {
             return self.speak(text).await;
         }
-
-        let pan_value = pan.unwrap_or(0.0);
+        let angle = spatial_angle.unwrap_or(0.0);
 
         // Pick a voice deterministically from the speaker hash
         let voice = speaker_hash.map_or(self.voice.as_str(), |hash| {
@@ -433,24 +452,24 @@ impl TtsBackend for EdgeTtsProvider {
             return Err(std::io::Error::other(format!("edge-tts failed: {stderr}")).into());
         }
 
-        // Step 2: apply stereo pan via ffmpeg (outputs WAV)
-        let panned_audio = apply_pan_with_ffmpeg(&tmp_path, pan_value).await?;
+        // Step 2: apply spatial filter (pan + front/back EQ) via ffmpeg
+        let spatial_audio = apply_spatial_with_ffmpeg(&tmp_path, angle).await?;
 
-        let tmp_panned = NamedTempFile::with_suffix(".wav")?;
-        let tmp_panned_path = tmp_panned.path().to_path_buf();
-        let mut f = File::create(&tmp_panned_path).await?;
-        f.write_all(&panned_audio).await?;
+        let tmp_spatial = NamedTempFile::with_suffix(".wav")?;
+        let tmp_spatial_path = tmp_spatial.path().to_path_buf();
+        let mut f = File::create(&tmp_spatial_path).await?;
+        f.write_all(&spatial_audio).await?;
         f.flush().await?;
         drop(f);
 
-        // Step 3: play the panned WAV
+        // Step 3: play the spatialised WAV
         let output_backend = self.output_backend.clone();
         let output_device = self.output_device.clone();
         let output_client_name = self.output_client_name.clone();
         tokio::task::spawn_blocking(move || match output_backend {
-            AudioOutputBackend::Rodio => play_file_blocking(&tmp_panned_path, 1.0),
+            AudioOutputBackend::Rodio => play_file_blocking(&tmp_spatial_path, 1.0),
             AudioOutputBackend::Mpv => play_file_with_mpv_blocking(
-                &tmp_panned_path,
+                &tmp_spatial_path,
                 1.0,
                 &output_device,
                 &output_client_name,
