@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, slice::Iter};
+use std::{
+    collections::{HashMap, VecDeque},
+    slice::Iter,
+};
 
 use chrono::Local;
 use color_eyre::Result;
@@ -41,6 +44,10 @@ pub struct ChatWidget {
     filters: SharedFilters,
     pub scroll_offset: Scrolling,
     current_channel_name: String,
+    /// True when the "all" aggregated tab is active; enables channel stripes.
+    pub is_all_tab: bool,
+    /// Per-channel stripe colours (shared from `App`).
+    pub channel_colors: HashMap<String, Color>,
 }
 
 impl ChatWidget {
@@ -89,6 +96,8 @@ impl ChatWidget {
             filters,
             scroll_offset,
             current_channel_name,
+            is_all_tab: false,
+            channel_colors: HashMap::new(),
         }
     }
 
@@ -170,6 +179,28 @@ impl ChatWidget {
                 },
                 username_highlight,
             );
+
+            // When on the "all" tab, prepend a coloured stripe and channel tag.
+            let mut lines = lines;
+            if self.is_all_tab && !data.channel.is_empty() {
+                let color = self
+                    .channel_colors
+                    .get(data.channel.as_str())
+                    .copied()
+                    .unwrap_or(Color::DarkGray);
+                if let Some(first) = lines.first_mut() {
+                    first.spans.insert(
+                        0,
+                        Span::styled(
+                            format!("#{} ", data.channel),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                    );
+                    first
+                        .spans
+                        .insert(0, Span::styled("▌ ", Style::default().fg(color)));
+                }
+            }
 
             for span in lines.into_iter().rev() {
                 if total_row_height < general_chunk_height {

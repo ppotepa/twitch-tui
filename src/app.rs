@@ -54,6 +54,21 @@ use crate::{
     utils::sanitization::clean_channel_name,
 };
 
+/// The permanent aggregated "all channels" tab name.
+pub const ALL_CHANNELS_TAB: &str = "all";
+
+/// Colour palette cycled when assigning a per-channel stripe colour.
+const CHANNEL_COLOR_PALETTE: [Color; 8] = [
+    Color::Cyan,
+    Color::Green,
+    Color::Yellow,
+    Color::Magenta,
+    Color::Red,
+    Color::Blue,
+    Color::LightCyan,
+    Color::LightGreen,
+];
+
 pub type SharedMessages = Rc<RefCell<VecDeque<MessageData>>>;
 
 struct ToastMessage {
@@ -102,6 +117,11 @@ pub struct App {
     /// Multi-channel tab state
     channel_tabs: Vec<String>,
     active_tab: usize,
+    /// The channel we are actually subscribed to on the WebSocket (may differ
+    /// from `current_channel()` when the "all" aggregated tab is active).
+    subscribed_channel: String,
+    /// Per-channel stripe colours assigned in rotation.
+    channel_colors: HashMap<String, Color>,
     toasts: VecDeque<ToastMessage>,
     /// Per-channel saved message history (saved/restored on channel switch)
     message_history: HashMap<String, VecDeque<MessageData>>,
@@ -251,8 +271,10 @@ impl App {
             running_audio: None,
             notification_handler,
             stream_info: None,
-            channel_tabs: vec![initial_channel],
-            active_tab: 0,
+            channel_tabs: vec![ALL_CHANNELS_TAB.to_string(), initial_channel.clone()],
+            active_tab: 1,
+            subscribed_channel: initial_channel,
+            channel_colors: HashMap::new(),
             toasts: VecDeque::new(),
             message_history: HashMap::new(),
         }
@@ -525,44 +547,96 @@ impl App {
         }
     }
 
+    /// Assign a colour to `channel` (or return the existing one).
+    fn assign_channel_color(&mut self, channel: &str) -> Color {
+        if let Some(&c) = self.channel_colors.get(channel) {
+            return c;
+        }
+        let idx = self.channel_colors.len() % CHANNEL_COLOR_PALETTE.len();
+        let color = CHANNEL_COLOR_PALETTE[idx];
+        self.channel_colors.insert(channel.to_string(), color);
+        color
+    }
+
     fn tab_next(&mut self) {
         if self.channel_tabs.len() > 1 {
+            let old_channel = self.current_channel();
             self.active_tab = (self.active_tab + 1) % self.channel_tabs.len();
-            let channel = self.channel_tabs[self.active_tab].clone();
-            let tx = self.twitch_tx.clone();
-            tokio::spawn(async move {
-                let _ = tx.send(TwitchAction::JoinChannel(channel)).await;
-            });
+            let new_channel = self.channel_tabs[self.active_tab].clone();
+            // Save/restore message history directly (bypasses handle_twitch_action).
+            self.message_history
+                .insert(old_channel, self.messages.borrow().clone());
+            let restored = self
+                .message_history
+                .get(&new_channel)
+                .cloned()
+                .unwrap_or_default();
+            *self.messages.borrow_mut() = restored;
+            self.components.chat.scroll_offset.jump_to(0);
+            if new_channel != ALL_CHANNELS_TAB {
+                self.subscribed_channel.clone_from(&new_channel);
+                let tx = self.twitch_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
+                });
+            }
         }
     }
 
     fn tab_prev(&mut self) {
         if self.channel_tabs.len() > 1 {
+            let old_channel = self.current_channel();
             self.active_tab = self
                 .active_tab
                 .checked_sub(1)
                 .unwrap_or(self.channel_tabs.len() - 1);
-            let channel = self.channel_tabs[self.active_tab].clone();
-            let tx = self.twitch_tx.clone();
-            tokio::spawn(async move {
-                let _ = tx.send(TwitchAction::JoinChannel(channel)).await;
-            });
+            let new_channel = self.channel_tabs[self.active_tab].clone();
+            self.message_history
+                .insert(old_channel, self.messages.borrow().clone());
+            let restored = self
+                .message_history
+                .get(&new_channel)
+                .cloned()
+                .unwrap_or_default();
+            *self.messages.borrow_mut() = restored;
+            self.components.chat.scroll_offset.jump_to(0);
+            if new_channel != ALL_CHANNELS_TAB {
+                self.subscribed_channel.clone_from(&new_channel);
+                let tx = self.twitch_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
+                });
+            }
         }
     }
 
     fn tab_close(&mut self) {
-        if self.channel_tabs.len() <= 1 {
+        // Require at least "all" + one real channel.
+        if self.channel_tabs.len() <= 2 || self.active_tab == 0 {
             return;
         }
+        let old_channel = self.current_channel();
         self.channel_tabs.remove(self.active_tab);
         if self.active_tab >= self.channel_tabs.len() {
             self.active_tab = self.channel_tabs.len() - 1;
         }
-        let channel = self.channel_tabs[self.active_tab].clone();
-        let tx = self.twitch_tx.clone();
-        tokio::spawn(async move {
-            let _ = tx.send(TwitchAction::JoinChannel(channel)).await;
-        });
+        let new_channel = self.channel_tabs[self.active_tab].clone();
+        self.message_history
+            .insert(old_channel, self.messages.borrow().clone());
+        let restored = self
+            .message_history
+            .get(&new_channel)
+            .cloned()
+            .unwrap_or_default();
+        *self.messages.borrow_mut() = restored;
+        self.components.chat.scroll_offset.jump_to(0);
+        if new_channel != ALL_CHANNELS_TAB {
+            self.subscribed_channel.clone_from(&new_channel);
+            let tx = self.twitch_tx.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(TwitchAction::JoinChannel(new_channel)).await;
+            });
+        }
     }
 
     fn cleanup(&mut self) {
@@ -795,6 +869,16 @@ impl App {
         match twitch_action {
             TwitchAction::JoinChannel(channel) => {
                 let channel = clean_channel_name(channel);
+
+                // Switching to the aggregated "all" tab only swaps the view.
+                if channel == ALL_CHANNELS_TAB {
+                    self.switch_channel_messages(&channel);
+                    self.set_state(State::Normal);
+                    return Ok(());
+                }
+
+                self.subscribed_channel.clone_from(&channel);
+                self.assign_channel_color(&channel);
                 self.switch_channel_messages(&channel);
                 self.emotes.unload();
 
@@ -841,7 +925,9 @@ impl App {
                     return;
                 }
 
-                let message_data = MessageData::from_twitch_message(m.clone(), &self.emotes);
+                let mut message_data = MessageData::from_twitch_message(m.clone(), &self.emotes);
+                message_data.channel.clone_from(&self.subscribed_channel);
+
                 if !KNOWN_CHATTERS.contains(&message_data.author.as_str())
                     && self.config.twitch.username != message_data.author
                 {
@@ -864,6 +950,32 @@ impl App {
                         && m.payload.to_lowercase().contains(&own.to_lowercase())
                     {
                         self.append_highlight(&m.author, &m.payload);
+                    }
+                }
+
+                // Always keep the "all" aggregated history up to date.
+                {
+                    let max = self.config.terminal.maximum_messages;
+                    let all_history = self
+                        .message_history
+                        .entry(ALL_CHANNELS_TAB.to_string())
+                        .or_insert_with(|| VecDeque::with_capacity(max));
+                    all_history.push_front(message_data.clone());
+                    if all_history.len() > max {
+                        all_history.pop_back();
+                    }
+                }
+
+                // When on the "all" tab also keep the source channel's history.
+                if self.active_tab == 0 {
+                    let max = self.config.terminal.maximum_messages;
+                    let ch_history = self
+                        .message_history
+                        .entry(self.subscribed_channel.clone())
+                        .or_insert_with(|| VecDeque::with_capacity(max));
+                    ch_history.push_front(message_data.clone());
+                    if ch_history.len() > max {
+                        ch_history.pop_back();
                     }
                 }
 
@@ -948,7 +1060,21 @@ impl App {
         let tab_titles: Vec<Line> = self
             .channel_tabs
             .iter()
-            .map(|c| Line::from(c.as_str().to_owned()))
+            .enumerate()
+            .map(|(i, c)| {
+                let color = if i == 0 {
+                    Color::White
+                } else {
+                    self.channel_colors
+                        .get(c.as_str())
+                        .copied()
+                        .unwrap_or(Color::White)
+                };
+                Line::from(Span::styled(
+                    c.as_str().to_owned(),
+                    Style::default().fg(color),
+                ))
+            })
             .collect();
         let tabs = Tabs::new(tab_titles)
             .block(Block::default().style(Style::default().bg(Color::DarkGray)))
@@ -1160,16 +1286,12 @@ impl Component for App {
             .constraints([Constraint::Min(1), Constraint::Length(1)])
             .areas(full_area);
 
-        // Reserve 1 line at the top for channel tabs (only when multiple tabs open)
-        let (tabs_area, content_area) = if self.channel_tabs.len() > 1 {
-            let [tabs, content] = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(1)])
-                .areas(main_area);
-            (Some(tabs), content)
-        } else {
-            (None, main_area)
-        };
+        // Always show the channel tabs bar (we always have "all" + at least one channel).
+        let [tabs_area_rect, content_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(1)])
+            .areas(main_area);
+        let tabs_area = Some(tabs_area_rect);
 
         let mut size = content_area;
 
@@ -1190,7 +1312,11 @@ impl Component for App {
         } else {
             match self.state {
                 State::Dashboard => self.components.dashboard.draw(f, Some(size)),
-                State::Normal => self.components.chat.draw(f, Some(size)),
+                State::Normal => {
+                    self.components.chat.is_all_tab = self.active_tab == 0;
+                    self.components.chat.channel_colors = self.channel_colors.clone();
+                    self.components.chat.draw(f, Some(size));
+                }
                 State::Help => self.components.help.draw(f, Some(size)),
             }
         }
@@ -1206,7 +1332,7 @@ impl Component for App {
             self.components.debug.draw(f, Some(rect));
         }
 
-        // Channel tabs bar
+        // Channel tabs bar (always rendered)
         if let Some(tabs_rect) = tabs_area {
             self.draw_channel_tabs(f, tabs_rect);
         }

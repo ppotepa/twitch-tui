@@ -47,6 +47,8 @@ pub struct MessageData {
     pub message_id: Option<String>,
     pub highlight: bool,
     pub badges: Option<String>,
+    /// The channel this message originated from (empty for system messages).
+    pub channel: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +62,8 @@ pub struct RawMessageData {
     pub message_id: Option<String>,
     pub highlight: bool,
     pub badges: Option<String>,
+    /// The channel this message originated from (empty for system messages).
+    pub channel: String,
 }
 
 #[bon]
@@ -74,6 +78,7 @@ impl RawMessageData {
         message_id: Option<String>,
         highlight: bool,
         badges: Option<String>,
+        #[builder(default)] channel: String,
     ) -> Self {
         Self {
             time_sent: Local::now(),
@@ -85,6 +90,7 @@ impl RawMessageData {
             message_id,
             highlight,
             badges,
+            channel,
         }
     }
 }
@@ -111,6 +117,7 @@ impl MessageData {
             message_id: msg.message_id,
             highlight: msg.highlight,
             badges: msg.badges,
+            channel: msg.channel,
         }
     }
 
@@ -674,6 +681,7 @@ mod tests {
                 message_id: None,
                 highlight: false,
                 badges: None,
+                channel: String::new(),
             }
             .hash_username(&Palette::Pastel),
             Rgb(159, 223, 221)
