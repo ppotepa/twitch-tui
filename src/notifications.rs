@@ -315,15 +315,15 @@ fn play_sound_file_blocking(
     }
 }
 
-/// Map a username to a deterministic L-R pan value in [-1.0, 1.0].
-/// -1.0 = full left, 0.0 = centre, 1.0 = full right.
-fn username_to_pan(username: &str) -> f32 {
+/// Compute deterministic pan and speaker hash from a username.
+/// Returns `(pan: f32, hash: u64)` where pan is in `[-1.0, 1.0]`.
+fn username_to_spatial(username: &str) -> (f32, u64) {
     let mut hasher = DefaultHasher::new();
     username.to_lowercase().hash(&mut hasher);
     let hash = hasher.finish();
-    // Map u64 to [-1.0, 1.0]: normalize to [0, 1] then scale to [-1, 1]
     let normalized = hash as f32 / u64::MAX as f32;
-    (normalized * 2.0) - 1.0
+    let pan = (normalized * 2.0) - 1.0;
+    (pan, hash)
 }
 
 async fn speak_text(
@@ -332,22 +332,22 @@ async fn speak_text(
     text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let formatted_text = if config.spatial {
-        // In spatial mode, don't read the name — just the message
         text.to_string()
     } else {
         format!("{author} says: {text}")
     };
     let mut last_error: Option<Box<dyn std::error::Error + Send + Sync>> = None;
 
-    for provider in config.ordered_providers() {
-        let pan = if config.spatial {
-            Some(username_to_pan(author))
-        } else {
-            None
-        };
+    let (pan, speaker_hash) = if config.spatial {
+        let (p, h) = username_to_spatial(author);
+        (Some(p), Some(h))
+    } else {
+        (None, None)
+    };
 
+    for provider in config.ordered_providers() {
         match create_tts_provider(&provider, config)
-            .speak_with_pan(&formatted_text, pan)
+            .speak_with_pan(&formatted_text, pan, speaker_hash)
             .await
         {
             Ok(()) => return Ok(()),

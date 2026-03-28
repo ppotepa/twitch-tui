@@ -16,6 +16,47 @@ fn shell_escape_single_quotes(text: &str) -> String {
     text.replace('\'', "'\\''")
 }
 
+/// Curated English edge-tts voices covering diverse accents and both genders.
+/// Indexed deterministically by `speaker_hash % len` to give each chatter a fixed voice.
+const EDGE_TTS_SPATIAL_VOICES: &[&str] = &[
+    "en-US-AndrewNeural",
+    "en-US-AriaNeural",
+    "en-US-AvaNeural",
+    "en-US-BrianNeural",
+    "en-US-ChristopherNeural",
+    "en-US-EmmaNeural",
+    "en-US-EricNeural",
+    "en-US-GuyNeural",
+    "en-US-JennyNeural",
+    "en-US-MichelleNeural",
+    "en-US-RogerNeural",
+    "en-US-SteffanNeural",
+    "en-GB-LibbyNeural",
+    "en-GB-MaisieNeural",
+    "en-GB-RyanNeural",
+    "en-GB-SoniaNeural",
+    "en-GB-ThomasNeural",
+    "en-AU-NatashaNeural",
+    "en-AU-WilliamMultilingualNeural",
+    "en-CA-ClaraNeural",
+    "en-CA-LiamNeural",
+    "en-IE-ConnorNeural",
+    "en-IE-EmilyNeural",
+    "en-IN-NeerjaNeural",
+    "en-IN-PrabhatNeural",
+    "en-NZ-MitchellNeural",
+    "en-NZ-MollyNeural",
+    "en-ZA-LeahNeural",
+    "en-ZA-LukeNeural",
+];
+
+/// Curated espeak-ng voice variants (language+variant) for spatial mode.
+const ESPEAK_SPATIAL_VOICES: &[&str] = &[
+    "en+m1", "en+m2", "en+m3", "en+m4", "en+m5", "en+m6", "en+m7", "en+f1", "en+f2", "en+f3",
+    "en+f4", "en+f5", "en-us+m1", "en-us+m2", "en-us+m3", "en-us+f1", "en-us+f2", "en-us+f3",
+    "en-gb+m1", "en-gb+m2", "en-gb+m3", "en-gb+f1", "en-gb+f2",
+];
+
 /// Apply stereo panning to an audio file using ffmpeg.
 /// Pan range: -1.0 (full left) to 1.0 (full right), 0.0 (centre) = no panning.
 /// Input can be any format ffmpeg understands (mp3, wav, etc.).
@@ -162,6 +203,7 @@ impl TtsBackend for EspeakNgProvider {
         &self,
         text: &str,
         pan: Option<f32>,
+        speaker_hash: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // If no pan or pan is centre-ish, use normal speak
         if pan.is_none_or(|p| p.abs() < 0.01) {
@@ -170,9 +212,14 @@ impl TtsBackend for EspeakNgProvider {
 
         let pan_value = pan.unwrap_or(0.0);
 
+        // Pick a voice variant deterministically from the speaker hash
+        let voice = speaker_hash.map_or(self.voice.as_str(), |hash| {
+            ESPEAK_SPATIAL_VOICES[(hash as usize) % ESPEAK_SPATIAL_VOICES.len()]
+        });
+
         let mut cmd = Command::new("espeak-ng");
         cmd.arg("-v")
-            .arg(&self.voice)
+            .arg(voice)
             .arg("-s")
             .arg(self.speed.to_string())
             .arg("--stdout")
@@ -348,6 +395,7 @@ impl TtsBackend for EdgeTtsProvider {
         &self,
         text: &str,
         pan: Option<f32>,
+        speaker_hash: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if pan.is_none_or(|p| p.abs() < 0.01) {
             return self.speak(text).await;
@@ -355,13 +403,18 @@ impl TtsBackend for EdgeTtsProvider {
 
         let pan_value = pan.unwrap_or(0.0);
 
+        // Pick a voice deterministically from the speaker hash
+        let voice = speaker_hash.map_or(self.voice.as_str(), |hash| {
+            EDGE_TTS_SPATIAL_VOICES[(hash as usize) % EDGE_TTS_SPATIAL_VOICES.len()]
+        });
+
         // Step 1: generate TTS audio to mp3 via edge-tts
         let tmp = NamedTempFile::with_suffix(".mp3")?;
         let tmp_path = tmp.path().to_path_buf();
 
         let synth = Command::new("edge-tts")
             .arg("--voice")
-            .arg(&self.voice)
+            .arg(voice)
             .arg("--rate")
             .arg(&self.rate)
             .arg("--volume")
