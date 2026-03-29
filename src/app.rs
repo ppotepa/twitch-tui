@@ -137,6 +137,8 @@ pub struct App {
     volume_popup: Option<VolumePopup>,
     /// Path to config.toml (for persisting popup edits).
     config_path: std::path::PathBuf,
+    /// Unix socket path used by the running audio mpv IPC server.
+    mpv_ipc_path: Option<std::path::PathBuf>,
 }
 
 macro_rules! shared {
@@ -159,11 +161,15 @@ impl App {
         };
 
         match process.try_wait() {
-            Ok(Some(_)) => self.running_audio = None,
+            Ok(Some(_)) => {
+                self.running_audio = None;
+                self.mpv_ipc_path = None;
+            }
             Ok(None) => {}
             Err(err) => {
                 error!("failed checking audio process: {err}");
                 self.running_audio = None;
+                self.mpv_ipc_path = None;
             }
         }
     }
@@ -292,6 +298,7 @@ impl App {
             message_history: HashMap::new(),
             volume_popup: None,
             config_path: get_config_dir().join("config.toml"),
+            mpv_ipc_path: None,
         }
     }
 
@@ -452,6 +459,10 @@ impl App {
                         &self.config.frontend.audio_output_device,
                         &self.config.frontend.audio_client_name,
                     );
+                    let ipc_path = std::env::temp_dir().join("twt-mpv-audio.sock");
+                    let _ = std::fs::remove_file(&ipc_path);
+                    args.push(format!("--input-ipc-server={}", ipc_path.display()));
+                    self.mpv_ipc_path = Some(ipc_path);
                 }
 
                 (cmd, args)
@@ -478,6 +489,10 @@ impl App {
                 }
 
                 player_cmd.push_str(" -");
+                let ipc_path = std::env::temp_dir().join("twt-mpv-audio.sock");
+                let _ = std::fs::remove_file(&ipc_path);
+                let _ = write!(player_cmd, " --input-ipc-server={}", ipc_path.display());
+                self.mpv_ipc_path = Some(ipc_path);
                 let cmd = "streamlink".to_string();
                 let args = vec![
                     url.clone(),
@@ -1435,6 +1450,11 @@ impl App {
         let notif_vol    = popup.notif_volume();
         let spatial      = popup.spatial_enabled();
 
+        // Apply stream volume to the running mpv process via IPC (no restart needed)
+        if let Some(ref ipc_path) = self.mpv_ipc_path.clone() {
+            Self::mpv_ipc_set_volume(ipc_path, stream_audio);
+        }
+
         // Update notification handler at runtime (spatial TTS picks this up immediately)
         self.notification_handler.set_tts_volume(tts_vol);
         self.notification_handler.set_notification_master_volume(notif_vol);
@@ -1453,5 +1473,26 @@ impl App {
 
         self.config = std::sync::Arc::new(new_cfg);
         self.volume_popup = None;
+    }
+
+    /// Send a `set_property volume` command to a running mpv process via its IPC socket.
+    fn mpv_ipc_set_volume(ipc_path: &std::path::Path, volume: u8) {
+        use std::io::Write;
+        use std::os::unix::net::UnixStream;
+
+        let cmd = format!(
+            "{{\"command\":[\"set_property\",\"volume\",{}]}}\n",
+            volume
+        );
+        match UnixStream::connect(ipc_path) {
+            Ok(mut sock) => {
+                if let Err(e) = sock.write_all(cmd.as_bytes()) {
+                    warn!("mpv IPC write error: {e}");
+                }
+            }
+            Err(e) => {
+                warn!("mpv IPC connect error ({}): {e}", ipc_path.display());
+            }
+        }
     }
 }
